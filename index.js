@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import qrcode from "qrcode-terminal";
 import pkg from "whatsapp-web.js";
 import { createCSVBuffer, formatAsCSV } from "./services/csvFormatter.js";
+import { generateCurlForItems } from "./services/curlFormatter.js";
 import { processReceiptImage } from "./services/imageProcessor.js";
 const { Client, LocalAuth, MessageMedia } = pkg;
 
@@ -76,6 +77,17 @@ client.on("message", async (message) => {
         if (extractedText && extractedText.trim().length > 0) {
           // Send the extracted text directly
           await message.reply(extractedText);
+
+          // Create and send CURL structure
+          try {
+            const curlMessage = generateCurlForItems(extractedText);
+            if (curlMessage) {
+              await message.reply(curlMessage);
+              console.log(`📡 CURL mock generated and sent to ${message.from}`);
+            }
+          } catch (curlError) {
+            console.error("❌ CURL creation error:", curlError);
+          }
 
           // Create and send CSV file
           try {

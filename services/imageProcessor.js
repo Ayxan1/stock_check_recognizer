@@ -55,7 +55,6 @@ async function processWithGemini(imageData, mimeType) {
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `Bu qəbz şəklindəki məlumatları diqqətlə oxuyub cədvəl formatında ver.
-
 Aşağıdakı formatda DƏQIQ çıxart:
 
 🏪 MAĞAZA: [mağaza adı]
@@ -64,20 +63,20 @@ Aşağıdakı formatda DƏQIQ çıxart:
 
 📝 MƏHSULLAR:
 
-| Məhsul | Ədəd/Çəki | Qiymət | Cəm |
-|--------|-----------|--------|-----|
-| [ad] | [miqdar] | [qiymət] AZN | [cəm] AZN |
-| [ad] | [miqdar] | [qiymət] AZN | [cəm] AZN |
+| Məhsul | Miqdar | Vahid | Qiymət | Cəm |
+|--------|--------|-------|--------|-----|
+| [ad] | [miqdar] | [vahid] | [qiymət] | [cəm] |
+| [ad] | [miqdar] | [vahid] | [qiymət] | [cəm] |
 
 💰 CƏMİ: [toplam] AZN
 
-ÖNƏMLİ:
-- Hər məhsulun adını, miqdarını, qiymətini və cəmini AYRI-AYRI göstər
-- Rəqəmləri DƏQİQ oxu (vergüllü rəqəmlər: 7.8, 3.45, 69.60)
-- Çəki olan yerlərdə "kq" yaz (məsələn: 0.46 kq)
-- Cədvəl düzgün formada olsun
-- ƏDV varsa, ayrıca göstər
-- Toplam məbləği yoxla və düzgün hesabla`;
+ÖNƏMLİ QAYDALAR:
+- Hər məhsulun adını, miqdarını, vahidini, qiymətini və cəmini AYRI-AYRI sütunlarda göstər.
+- Vahid (unit) YALNIZ "pcs" (ədəd üçün) və ya "kg" (çəki üçün) ola bilər. Məsələn, 0.460 kq üçün miqdar: 0.46, vahid: kg olmalıdır. 2 ədəd üçün miqdar: 2, vahid: pcs olmalıdır.
+- Rəqəmləri DƏQİQ oxu (kəsr hissələri nöqtə ilə ayır, məsələn: 7.8, 3.45, 69.60).
+- Qiymət və Cəm DƏN YALNIZ rəqəm yaz (AZN sözünü yazma).
+- Cədvəl formatını dəqiqliklə qoru.
+- Toplam məbləği yoxla və düzgün hesabla.`;
 
     const imageParts = [
       {
