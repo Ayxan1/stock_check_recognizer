@@ -76,7 +76,15 @@ Aşağıdakı formatda DƏQIQ çıxart:
 - Rəqəmləri DƏQİQ oxu (kəsr hissələri nöqtə ilə ayır, məsələn: 7.8, 3.45, 69.60).
 - Qiymət və Cəm DƏN YALNIZ rəqəm yaz (AZN sözünü yazma).
 - Cədvəl formatını dəqiqliklə qoru.
-- Toplam məbləği yoxla və düzgün hesabla.`;
+- Toplam məbləği yoxla və düzgün hesabla.
+
+HESABAT SÜTUNU VƏ XÜSUSİ VAHİDLƏR ÜÇÜN QAYDALAR:
+- Əgər qəbzdə "Hesabat" adlı sütun və ya sahə varsa, həmin sütundakı məlumatı da miqdar/vahid hesablamaq üçün nəzərə al.
+- Əgər məhsulun vahidi "kg" və ya "ədəd/əd" deyilsə (məsələn: sumka, kaset, top, bağlama, lüt və s. kimi qeyri-standart vahidlər), o zaman Hesabat sütunundakı məlumatı oxu və oradan ədədi miqdarı çıxart.
+- Ölçü formatı "AxBxC" şəklindədirsə (məsələn: 1x5x1.5m, 2x3x4 və s.), ortadakı rəqəm (B dəyəri) ədəd miqdarını bildirir.
+  Nümunə: "1x5x1.5m" → miqdar = 5, vahid = pcs
+  Nümunə: "2x10x0.8m" → miqdar = 10, vahid = pcs
+- Bu cür hallarda həmin hesablanmış ədəd dəyərini Miqdar sütununa yaz, Vahid olaraq "pcs" göstər.`;
 
     const imageParts = [
       {

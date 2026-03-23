@@ -13,8 +13,12 @@ const client = new Client({
   authStrategy: new LocalAuth({
     clientId: "receipt-reader-bot",
   }),
+  // Do not show online/typing status
+  markOnlineOnConnect: false,
   puppeteer: {
     headless: true,
+    executablePath:
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -34,9 +38,17 @@ client.on("qr", (qr) => {
 });
 
 // Client ready
-client.on("ready", () => {
+client.on("ready", async () => {
   console.log("✅ WhatsApp Receipt Reader Bot is ready!");
   console.log("📸 Send me a receipt image and I'll convert it to text.");
+
+  // Set presence to unavailable so the account doesn't appear online
+  try {
+    await client.sendPresenceUnavailable();
+    console.log("🔕 Presence set to unavailable (status hidden).");
+  } catch (e) {
+    console.warn("⚠️ Could not set presence unavailable:", e.message);
+  }
 });
 
 // Handle authentication
