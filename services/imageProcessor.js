@@ -49,10 +49,15 @@ export async function processReceiptImage(imageData, mimeType) {
  * @param {string} mimeType - MIME type of the image
  * @returns {Promise<string>} - Extracted text
  */
-async function processWithGemini(imageData, mimeType) {
+async function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function processWithGemini(imageData, mimeType, retryCount = 0) {
+  const MAX_RETRIES = 3;
   try {
-    // Using Gemini 2.5 Flash - latest stable multimodal model
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    // Using Gemini 1.5 Flash - 1500 free requests/day vs 20 for 2.5 Flash
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `Bu qəbz şəklindəki məlumatları diqqətlə oxuyub cədvəl formatında ver.
 Aşağıdakı formatda DƏQIQ çıxart:
@@ -81,10 +86,18 @@ Aşağıdakı formatda DƏQIQ çıxart:
 HESABAT SÜTUNU VƏ XÜSUSİ VAHİDLƏR ÜÇÜN QAYDALAR:
 - Əgər qəbzdə "Hesabat" adlı sütun və ya sahə varsa, həmin sütundakı məlumatı da miqdar/vahid hesablamaq üçün nəzərə al.
 - Əgər məhsulun vahidi "kg" və ya "ədəd/əd" deyilsə (məsələn: sumka, kaset, top, bağlama, lüt və s. kimi qeyri-standart vahidlər), o zaman Hesabat sütunundakı məlumatı oxu və oradan ədədi miqdarı çıxart.
-- Ölçü formatı "AxBxC" şəklindədirsə (məsələn: 1x5x1.5m, 2x3x4 və s.), ortadakı rəqəm (B dəyəri) ədəd miqdarını bildirir.
-  Nümunə: "1x5x1.5m" → miqdar = 5, vahid = pcs
-  Nümunə: "2x10x0.8m" → miqdar = 10, vahid = pcs
-- Bu cür hallarda həmin hesablanmış ədəd dəyərini Miqdar sütununa yaz, Vahid olaraq "pcs" göstər.`;
+
+HESABAT SÜTUNUNDA ÖLÇÜLƏRİN AYRIŞDIRILMASI - ÇOX VACİBDİR:
+- Hesabat sütununda dəyər "RəqəmxRəqəmxRəqəm" formatındadırsa (3 hissə, məsələn: 1x5x1.5 və ya 2x10x0.8m):
+  → Bu HƏCMİ ölçüdür: birinci=en, İKİNCİ=MİQDAR (ədəd sayı), üçüncü=uzunluq/ölçü
+  → Miqdar olaraq ORTADAKI (ikinci) rəqəmi götür, vahid = pcs
+  → Nümunə: "1x5x1.5m" → miqdar = 5, vahid = pcs
+  → Nümunə: "2x10x0.8m" → miqdar = 10, vahid = pcs
+
+- Hesabat sütununda dəyər "RəqəmxRəqəm" formatındadırsa (yalnız 2 hissə, məsələn: 3x2.5 və ya 1.2x4.5):
+  → Bu sadəcə ÇƏKİ və ya QİYMƏT hesablamasıdır, ədəd miqdarı DEYİL
+  → Bu halda Hesabat sütunundakı dəyəri miqdar kimi GÖTÜRMƏ
+  → Məhsulu normal qaydada işlə: miqdar və vahidi birbaşa qəbzin əsas məlumatından götür`;
 
     const imageParts = [
       {
@@ -102,6 +115,22 @@ HESABAT SÜTUNU VƏ XÜSUSİ VAHİDLƏR ÜÇÜN QAYDALAR:
     console.log("✅ Gemini OCR completed successfully");
     return extractedText;
   } catch (error) {
+    // Handle rate limit (429) with automatic retry
+    if (error.status === 429 && retryCount < MAX_RETRIES) {
+      // Extract retry delay from error details, default to 60s
+      const retryDelay =
+        error.errorDetails?.find(
+          (d) => d["@type"] === "type.googleapis.com/google.rpc.RetryInfo",
+        )?.retryDelay ?? "60s";
+      const delayMs = (parseInt(retryDelay) || 60) * 1000;
+
+      console.warn(
+        `⚠️ Gemini rate limit hit. Retrying in ${delayMs / 1000}s... (attempt ${retryCount + 1}/${MAX_RETRIES})`,
+      );
+      await sleep(delayMs);
+      return processWithGemini(imageData, mimeType, retryCount + 1);
+    }
+
     console.error("❌ Gemini API error:", error.message);
     throw error;
   }
