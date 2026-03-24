@@ -66,9 +66,18 @@ client.on("disconnected", (reason) => {
   console.log("⚠️ Client disconnected:", reason);
 });
 
+// Only process messages from this number
+const ALLOWED_NUMBER = "994777333003@c.us";
+
 // Handle incoming messages
 client.on("message", async (message) => {
   try {
+    // Ignore messages from anyone except the allowed number
+    if (message.from !== ALLOWED_NUMBER) {
+      console.log(`🚫 Ignored message from ${message.from}`);
+      return;
+    }
+
     // Check if message has media
     if (message.hasMedia) {
       const media = await message.downloadMedia();
