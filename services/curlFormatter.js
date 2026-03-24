@@ -2,26 +2,41 @@ const API_URL =
   "http://localhost:8000/api/inventory/inventory-items/add-or-update/";
 
 /**
- * Normalize unit and quantity to kg if it's a weight unit
+ * Normalize weight value to kg
  */
 function normalizeWeight(quantity, unitRaw) {
-  const u = unitRaw.toLowerCase().trim();
-
-  if (u === "qr" || u === "qram" || u === "gr" || u === "g") {
+  const u = unitRaw.toLowerCase().trim().replace(/\.$/, ""); // strip trailing dot
+  if (u === "qram" || u === "qr" || u === "gr" || u === "g")
     return { quantity: quantity / 1000, unit: "kg" };
-  }
-  if (u === "ton" || u === "t") {
+  if (u === "ton" || u === "t")
     return { quantity: quantity * 1000, unit: "kg" };
-  }
-  if (u === "kq" || u === "kq." || u === "kg") {
+  if (u === "kq" || u === "kg")
     return { quantity, unit: "kg" };
-  }
-  if (u === "pcs" || u === "əd" || u === "ədəd" || u === "ed") {
+  if (u === "pcs" || u === "əd" || u === "ədəd" || u === "ed")
     return { quantity, unit: "pcs" };
+  return { quantity, unit: "pcs" };
+}
+
+/**
+ * Parse weight info embedded in the product name.
+ * Ignores packaging patterns like (1x24) — those are not used for quantity.
+ * Returns { weightKg } if weight found, otherwise null.
+ */
+function parseNameMeta(name) {
+  // Match longer unit names first to avoid partial matches (e.g. "qram" before "qr", "kq" before "g")
+  // Anchored to word boundary, handles optional trailing dot for "kq."
+  const weightMatch = name.match(
+    /([\d.,]+)\s*(qram|kq\.?|kg|ton|qr|gr|g)\b/i
+  );
+
+  if (weightMatch) {
+    const weightVal = parseFloat(weightMatch[1].replace(",", "."));
+    const weightUnit = weightMatch[2].toLowerCase();
+    const { quantity: weightKg } = normalizeWeight(weightVal, weightUnit);
+    return { weightKg };
   }
 
-  // Default: pcs
-  return { quantity, unit: "pcs" };
+  return null;
 }
 
 /**
@@ -46,14 +61,21 @@ function parseItems(geminiResponse) {
         const name = parts[0];
 
         let quantityRaw = parts[1].replace(/[^\d.,]/g, "").replace(",", ".");
-        const quantityParsed = parseFloat(quantityRaw) || 1;
+        let receiptQty = parseFloat(quantityRaw) || 1;
 
         const unitRaw = parts[2].trim();
+        let { quantity, unit } = normalizeWeight(receiptQty, unitRaw);
 
-        // Normalize weight units → always produce kg or pcs
-        const { quantity, unit } = normalizeWeight(quantityParsed, unitRaw);
+        // If product name has weight info, calculate total weight in kg
+        const nameMeta = parseNameMeta(name);
+        if (nameMeta && nameMeta.weightKg !== null) {
+          quantity = parseFloat((nameMeta.weightKg * receiptQty).toFixed(4));
+          unit = "kg";
+        }
 
-        let priceRaw = parts[3].replace(/[^\d.,]/g, "").replace(",", ".");
+        // Prefer Cəm (total) column [4] over unit price [3] if available
+        const priceColRaw = parts.length >= 5 ? parts[4] : parts[3];
+        let priceRaw = priceColRaw.replace(/[^\d.,]/g, "").replace(",", ".");
         const price = parseFloat(priceRaw) || 0;
 
         items.push({ name, category: 1, unit, supplier: 1, price, quantity });
