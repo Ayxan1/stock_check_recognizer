@@ -2,45 +2,29 @@ const API_URL =
   "http://localhost:8000/api/inventory/inventory-items/add-or-update/";
 
 /**
- * Normalize weight value to kg
+ * Normalise a unit string coming from the check's Ölçü vahidi column.
+ * Accepts: kq, kg, g, qr, gr, qram, ton, eded, əd, ədəd, ed, pcs, l, litr, ml
+ *
+ * @param {string} rawUnit
+ * @returns {string} canonical unit: "kg" | "g" | "l" | "ml" | "pcs"
  */
-function normalizeWeight(quantity, unitRaw) {
-  const u = unitRaw.toLowerCase().trim().replace(/\.$/, ""); // strip trailing dot
-  if (u === "qram" || u === "qr" || u === "gr" || u === "g")
-    return { quantity: quantity / 1000, unit: "kg" };
-  if (u === "ton" || u === "t")
-    return { quantity: quantity * 1000, unit: "kg" };
-  if (u === "kq" || u === "kg")
-    return { quantity, unit: "kg" };
-  if (u === "pcs" || u === "əd" || u === "ədəd" || u === "ed")
-    return { quantity, unit: "pcs" };
-  return { quantity, unit: "pcs" };
+function normaliseUnit(rawUnit) {
+  const u = (rawUnit || "").toLowerCase().trim().replace(/\.$/, "");
+
+  if (u === "kq" || u === "kg")                         return "kg";
+  if (u === "g"  || u === "qr" || u === "gr" || u === "qram") return "g";
+  if (u === "ton" || u === "t")                         return "kg"; // treat ton as kg (value already large)
+  if (u === "l"  || u === "litr")                       return "l";
+  if (u === "ml")                                       return "ml";
+
+  // eded, əd, ədəd, ed, pcs, or anything else → piece-based
+  return "pcs";
 }
 
 /**
- * Parse weight info embedded in the product name.
- * Ignores packaging patterns like (1x24) — those are not used for quantity.
- * Returns { weightKg } if weight found, otherwise null.
- */
-function parseNameMeta(name) {
-  // Match longer unit names first to avoid partial matches (e.g. "qram" before "qr", "kq" before "g")
-  // Anchored to word boundary, handles optional trailing dot for "kq."
-  const weightMatch = name.match(
-    /([\d.,]+)\s*(qram|kq\.?|kg|ton|qr|gr|g)\b/i
-  );
-
-  if (weightMatch) {
-    const weightVal = parseFloat(weightMatch[1].replace(",", "."));
-    const weightUnit = weightMatch[2].toLowerCase();
-    const { quantity: weightKg } = normalizeWeight(weightVal, weightUnit);
-    return { weightKg };
-  }
-
-  return null;
-}
-
-/**
- * Parse items from Gemini table response
+ * Parse items from Gemini table response.
+ * Gemini returns 4 columns: Məhsul | Miqdar | Vahid | Cəm
+ * Falls back gracefully to 3-column legacy format.
  */
 function parseItems(geminiResponse) {
   const items = [];
@@ -50,6 +34,8 @@ function parseItems(geminiResponse) {
     if (
       line.includes("|") &&
       !line.toLowerCase().includes("məhsul") &&
+      !line.toLowerCase().includes("miqdar") &&
+      !line.toLowerCase().includes("say") &&
       !line.includes("---")
     ) {
       const parts = line
@@ -57,29 +43,25 @@ function parseItems(geminiResponse) {
         .map((p) => p.trim())
         .filter((p) => p.length > 0);
 
+      let name, quantity, unit, totalPrice;
+
       if (parts.length >= 4) {
-        const name = parts[0];
-
-        let quantityRaw = parts[1].replace(/[^\d.,]/g, "").replace(",", ".");
-        let receiptQty = parseFloat(quantityRaw) || 1;
-
-        const unitRaw = parts[2].trim();
-        let { quantity, unit } = normalizeWeight(receiptQty, unitRaw);
-
-        // If product name has weight info, calculate total weight in kg
-        const nameMeta = parseNameMeta(name);
-        if (nameMeta && nameMeta.weightKg !== null) {
-          quantity = parseFloat((nameMeta.weightKg * receiptQty).toFixed(4));
-          unit = "kg";
-        }
-
-        // Prefer Cəm (total) column [4] over unit price [3] if available
-        const priceColRaw = parts.length >= 5 ? parts[4] : parts[3];
-        let priceRaw = priceColRaw.replace(/[^\d.,]/g, "").replace(",", ".");
-        const price = parseFloat(priceRaw) || 0;
-
-        items.push({ name, category: 1, unit, supplier: 1, price, quantity });
+        // New 4-column format: Məhsul | Miqdar | Vahid | Cəm
+        name       = parts[0];
+        quantity   = parseFloat(parts[1].replace(",", ".")) || 1;
+        unit       = normaliseUnit(parts[2]);
+        totalPrice = parseFloat(parts[3].replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
+      } else if (parts.length === 3) {
+        // Legacy 3-column format: Məhsul | Say | Cəm — default to pcs
+        name       = parts[0];
+        quantity   = parseFloat(parts[1].replace(",", ".")) || 1;
+        unit       = "pcs";
+        totalPrice = parseFloat(parts[2].replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
+      } else {
+        continue;
       }
+
+      items.push({ name, category: 1, unit, supplier: 1, price: totalPrice, quantity });
     }
   }
 

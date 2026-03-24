@@ -67,9 +67,9 @@ async function processWithGemini(imageData, mimeType, retryCount = 0) {
 
 📝 MƏHSULLAR:
 
-| Məhsul | Miqdar | Vahid | Qiymət | Cəm |
-|--------|--------|-------|--------|-----|
-| [ad] | [miqdar] | [vahid] | [qiymət] | [cəm] |
+| Məhsul | Miqdar | Vahid | Cəm |
+|--------|--------|-------|-----|
+| [ad] | [miqdar] | [vahid] | [cəm] |
 
 💰 CƏMİ: [toplam] AZN
 
@@ -79,27 +79,31 @@ async function processWithGemini(imageData, mimeType, retryCount = 0) {
    - Məhsul adını qəbzdə yazıldığı kimi OLDUĞU KİMİ köçür (çəki, qablama hər şeylə birlikdə).
    - Nümunə: "T.Biber SALÇA-BİZİM 680qr(1x12)" → adı elə bu kimi yaz.
 
-2. MİQDAR — YALNIZ "Qədər" sütunundakı rəqəmi yaz. BAŞQA HEÇ NƏ YOX:
-   - Qəbzdəki "Qədər" / "Say" sütununda hansı rəqəm varsa, onu olduğu kimi yaz.
-   - Hesabat sütununu, qablama məlumatını MİQDAR KIMI YAZMA.
-   - HEÇ BİR HESABLAMA ETMƏ. Sadəcə "Qədər" sütunundakı rəqəmi köçür.
+2. MİQDAR — YALNIZ "Miqdar" / "Qədər" / "Say" sütunundakı rəqəmi yaz. HEÇ BİR HESABLAMA ETMƏ:
+   - Qəbzdəki "Miqdar" / "Qədər" / "Say" sütununda hansı rəqəm varsa, onu olduğu kimi yaz.
+   - Kəsr ədədləri nöqtə ilə yaz (məsələn: 5.000, 0.555, 1.450).
    - Bu qəbzdən nümunələr:
-     → "T.Biber SALÇA-BİZİM 680qr(1x12)" → Qədər sütunu = 3 → Miqdar = 3
-     → "T.Bizim tarla tomatı 720qr(1x12)" → Qədər sütunu = 3 → Miqdar = 3
-     → "Uksus 70% 160qr(1x40)7628"        → Qədər sütunu = 3 → Miqdar = 3
-     → "Bulyon ROLTON TOYUQ 90qr(1x24)"   → Qədər sütunu = 1 → Miqdar = 1
-     → "Sosiska Səhər 1kq"                → Qədər sütunu = 1 → Miqdar = 1
-     → "Pen.MOZARELLA 1kq(Ağd)"           → Qədər sütunu = 1 → Miqdar = 1
-     → "Süd Savuşkin 3.1%(1x12)"          → Qədər sütunu = 2 → Miqdar = 2
-     → "Alpen.FINDIQ(1x24)"               → Qədər sütunu = 10 → Miqdar = 10
-     → "Yumurta ELMAN(Kasset)"            → Qədər sütunu = 3 → Miqdar = 3
+     → "DUYU GULNAR"            → Miqdar sütunu = 5.000  → Miqdar = 5.000
+     → "SARI KISMIS RASSIN"     → Miqdar sütunu = 0.555  → Miqdar = 0.555
+     → "SARIKOK SIRLANKA KQ"    → Miqdar sütunu = 0.540  → Miqdar = 0.540
+     → "TAMAT TARAVAT 1.450"    → Miqdar sütunu = 1.000  → Miqdar = 1.000
+     → "T.Biber SALÇA-BİZİM 680qr(1x12)" → Miqdar sütunu = 3 → Miqdar = 3
+     → "Bulyon ROLTON TOYUQ 90qr(1x24)"  → Miqdar sütunu = 1 → Miqdar = 1
+     → "Alpen.FINDIQ(1x24)"              → Miqdar sütunu = 10 → Miqdar = 10
 
-3. VAHİD:
-   - Məhsul adında çəki (qr, kq, kg, g) varsa → "kg" yaz.
-   - Çəki yoxdursa → "pcs" yaz.
+3. VAHİD — qəbzdəki "Ölçü vahidi" / "Ölçü v." sütunundakı dəyəri yaz:
+   - Yalnız qəbzdə yazılan vahidi köçür. Ola biləcək dəyərlər: kq, kg, g, qr, eded, l, ml, pcs
+   - Əgər qəbzdə "kq" yazılıbsa → "kq" yaz.
+   - Əgər qəbzdə "eded" yazılıbsa → "eded" yaz.
+   - Əgər vahid sütunu boşdursa → "pcs" yaz.
+   - Bu qəbzdən nümunələr:
+     → "DUYU GULNAR"         → Ölçü vahidi = kq   → Vahid = kq
+     → "SARI KISMIS RASSIN"  → Ölçü vahidi = kq   → Vahid = kq
+     → "SARIKOK SIRLANKA KQ" → Ölçü vahidi = kq   → Vahid = kq
+     → "TAMAT TARAVAT 1.450" → Ölçü vahidi = eded → Vahid = eded
 
-4. QİYMƏT və CƏM:
-   - Qəbzdəki "Ümumi məbləğ" sütunundakı rəqəmi "Cəm" kimi yaz.
+4. CƏM:
+   - Qəbzdəki "Məbləğ" / "Ümumi məbləğ" sütunundakı rəqəmi olduğu kimi yaz.
    - Rəqəmləri DƏQİQ oxu, kəsr hissəsi nöqtə ilə (məsələn: 5.40, 19.68).
    - AZN sözünü yazma, yalnız rəqəm.`;
 
