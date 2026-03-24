@@ -57,7 +57,7 @@ async function processWithGemini(imageData, mimeType, retryCount = 0) {
   const MAX_RETRIES = 3;
   try {
     // Using Gemini 1.5 Flash - 1500 free requests/day vs 20 for 2.5 Flash
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `Bu qəbz şəklindəki məlumatları diqqətlə oxuyub cədvəl formatında ver.
 Aşağıdakı formatda DƏQIQ çıxart:
@@ -77,27 +77,41 @@ Aşağıdakı formatda DƏQIQ çıxart:
 
 ÖNƏMLİ QAYDALAR:
 - Hər məhsulun adını, miqdarını, vahidini, qiymətini və cəmini AYRI-AYRI sütunlarda göstər.
-- Vahid (unit) YALNIZ "pcs" (ədəd üçün) və ya "kg" (çəki üçün) ola bilər. Məsələn, 0.460 kq üçün miqdar: 0.46, vahid: kg olmalıdır. 2 ədəd üçün miqdar: 2, vahid: pcs olmalıdır.
+- Vahid (unit) YALNIZ "pcs" (ədəd üçün) və ya "kg" (çəki üçün) ola bilər.
 - Rəqəmləri DƏQİQ oxu (kəsr hissələri nöqtə ilə ayır, məsələn: 7.8, 3.45, 69.60).
 - Qiymət və Cəm DƏN YALNIZ rəqəm yaz (AZN sözünü yazma).
 - Cədvəl formatını dəqiqliklə qoru.
 - Toplam məbləği yoxla və düzgün hesabla.
 
+ÇƏKİ VAHİDLƏRİNİ KG-A ÇEVİRMƏ QAYDALARI - ÇOX VACİBDİR:
+- Qəbzdə çəki məlumatı aşağıdakı vahidlərdən birində ola bilər — HAMISI kg-a çevrilməlidir:
+  → "qr", "qram", "gr", "g" → qramdan kg-a: miqdar ÷ 1000
+     Nümunə: 460 qr → miqdar = 0.460, vahid = kg
+     Nümunə: 250 g → miqdar = 0.250, vahid = kg
+  → "kq", "kq.", "kg", "KQ", "KG" → artıq kg-dadır, dəyişdirmə
+     Nümunə: 1.5 kq → miqdar = 1.5, vahid = kg
+  → "ton", "t" → tondan kg-a: miqdar × 1000
+     Nümunə: 0.5 ton → miqdar = 500, vahid = kg
+- Çəki vahidi olan məhsullar üçün vahid HƏMİŞƏ "kg" olmalıdır, heç vaxt "pcs" yazma!
+
 HESABAT SÜTUNU VƏ XÜSUSİ VAHİDLƏR ÜÇÜN QAYDALAR:
-- Əgər qəbzdə "Hesabat" adlı sütun və ya sahə varsa, həmin sütundakı məlumatı da miqdar/vahid hesablamaq üçün nəzərə al.
-- Əgər məhsulun vahidi "kg" və ya "ədəd/əd" deyilsə (məsələn: sumka, kaset, top, bağlama, lüt və s. kimi qeyri-standart vahidlər), o zaman Hesabat sütunundakı məlumatı oxu və oradan ədədi miqdarı çıxart.
+- Əgər qəbzdə "Hesabat" adlı sütun və ya sahə varsa, həmin sütundakı məlumatı miqdar hesablamaq üçün nəzərə al.
+- Əgər məhsulun vahidi "kg" və ya "ədəd/əd" deyilsə (məsələn: sumka, kaset, top, bağlama, lüt və s.), Hesabat sütunundakı məlumatdan miqdarı müəyyən et.
 
-HESABAT SÜTUNUNDA ÖLÇÜLƏRİN AYRIŞDIRILMASI - ÇOX VACİBDİR:
-- Hesabat sütununda dəyər "RəqəmxRəqəmxRəqəm" formatındadırsa (3 hissə, məsələn: 1x5x1.5 və ya 2x10x0.8m):
-  → Bu HƏCMİ ölçüdür: birinci=en, İKİNCİ=MİQDAR (ədəd sayı), üçüncü=uzunluq/ölçü
-  → Miqdar olaraq ORTADAKI (ikinci) rəqəmi götür, vahid = pcs
-  → Nümunə: "1x5x1.5m" → miqdar = 5, vahid = pcs
-  → Nümunə: "2x10x0.8m" → miqdar = 10, vahid = pcs
+HESABAT SÜTUNUNDA MİQDAR HESABLAMA QAYDALARI - ÇOX VACİBDİR:
 
-- Hesabat sütununda dəyər "RəqəmxRəqəm" formatındadırsa (yalnız 2 hissə, məsələn: 3x2.5 və ya 1.2x4.5):
-  → Bu sadəcə ÇƏKİ və ya QİYMƏT hesablamasıdır, ədəd miqdarı DEYİL
-  → Bu halda Hesabat sütunundakı dəyəri miqdar kimi GÖTÜRMƏ
-  → Məhsulu normal qaydada işlə: miqdar və vahidi birbaşa qəbzin əsas məlumatından götür`;
+- Hesabat sütununda "AxBxC" formatı varsa (DƏQIQ 3 HİSSƏ, məsələn: 1x5x1.5 və ya 2x10x0.8m):
+  → Ümumi miqdar = A × B (birinci rəqəm VURULur ikinci rəqəmə)
+  → Nümunə: "1x5x1.5m" → miqdar = 1 × 5 = 5, vahid = pcs
+  → Nümunə: "2x10x0.8m" → miqdar = 2 × 10 = 20, vahid = pcs
+  → Nümunə: "3x4x1.2m" → miqdar = 3 × 4 = 12, vahid = pcs
+
+- Hesabat sütununda "AxB" formatı varsa (DƏQIQ 2 HİSSƏ, məsələn: 3x2.5 və ya 2x4.80):
+  → Ümumi miqdar = A (yalnız BİRİNCİ rəqəm, B-ni işlətmə)
+  → B rəqəmi vahid qiymətdir, miqdar DEYİL
+  → Nümunə: "3x2.5" → miqdar = 3, qiymət = 2.5, vahid = pcs
+  → Nümunə: "2x4.80" → miqdar = 2, qiymət = 4.80, vahid = pcs
+  → XƏBƏRDARLIQ: B dəyərini (2.5, 4.80 və s.) HEÇ VAXT miqdar kimi yazma!`;
 
     const imageParts = [
       {

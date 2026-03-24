@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 import qrcode from "qrcode-terminal";
 import pkg from "whatsapp-web.js";
 import { createCSVBuffer, formatAsCSV } from "./services/csvFormatter.js";
-import { generateCurlForItems } from "./services/curlFormatter.js";
+import { generateCurlForItems, sendItemsToApi } from "./services/curlFormatter.js";
 import { processReceiptImage } from "./services/imageProcessor.js";
 const { Client, LocalAuth, MessageMedia } = pkg;
 
@@ -15,6 +15,15 @@ const client = new Client({
   }),
   // Do not show online/typing status
   markOnlineOnConnect: false,
+  // Restart automatically if auth fails
+  restartOnAuthFail: true,
+  // Increase timeout for slow WhatsApp Web loading
+  authTimeoutMs: 60000,
+  webVersionCache: {
+    type: "remote",
+    remotePath:
+      "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html",
+  },
   puppeteer: {
     headless: true,
     executablePath:
@@ -61,9 +70,13 @@ client.on("auth_failure", (msg) => {
   console.error("❌ Authentication failed:", msg);
 });
 
-// Handle disconnection
+// Handle disconnection - auto reinitialize
 client.on("disconnected", (reason) => {
   console.log("⚠️ Client disconnected:", reason);
+  console.log("🔄 Reinitializing in 5 seconds...");
+  setTimeout(() => {
+    client.initialize();
+  }, 5000);
 });
 
 // Only process messages from this number
@@ -99,15 +112,15 @@ client.on("message", async (message) => {
           // Send the extracted text directly
           await message.reply(extractedText);
 
-          // Create and send CURL structure
+          // Send items to localhost:8000 API and report results
           try {
-            const curlMessage = generateCurlForItems(extractedText);
-            if (curlMessage) {
-              await message.reply(curlMessage);
-              console.log(`📡 CURL mock generated and sent to ${message.from}`);
+            const apiSummary = await sendItemsToApi(extractedText);
+            if (apiSummary) {
+              await message.reply(apiSummary);
+              console.log(`📡 Items sent to API for ${message.from}`);
             }
           } catch (curlError) {
-            console.error("❌ CURL creation error:", curlError);
+            console.error("❌ API send error:", curlError);
           }
 
           // Create and send CSV file
