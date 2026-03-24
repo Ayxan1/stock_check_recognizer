@@ -2,6 +2,38 @@ const API_URL =
   "http://localhost:8000/api/inventory/inventory-items/add-or-update/";
 
 /**
+ * Transliterate Azerbaijani / Turkish special characters to ASCII equivalents,
+ * then trim surrounding whitespace and replace inner spaces with hyphens.
+ *
+ * Examples:
+ *   "  DUYU GULNAR  "          → "DUYU-GULNAR"
+ *   "T.Biber SALÇA-BİZİM"      → "T.Biber-SALCA-BIZIM"
+ *   "Sosiska Səhər 1kq"        → "Sosiska-Seher-1kq"
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+function slugifyName(name) {
+  const MAP = {
+    ə: "e", Ə: "E",
+    ö: "o", Ö: "O",
+    ü: "u", Ü: "U",
+    ğ: "g", Ğ: "G",
+    ı: "i", İ: "I",
+    ş: "s", Ş: "S",
+    ç: "c", Ç: "C",
+    â: "a", Â: "A",
+    î: "i", Î: "I",
+    û: "u", Û: "U",
+  };
+
+  return name
+    .replace(/[əƏöÖüÜğĞıİşŞçÇâÂîÎûÛ]/g, (ch) => MAP[ch] || ch)
+    .trim()
+    .replace(/\s+/g, "-");
+}
+
+/**
  * Normalise a unit string coming from the check's Ölçü vahidi column.
  * Accepts: kq, kg, g, qr, gr, qram, ton, eded, əd, ədəd, ed, pcs, l, litr, ml
  *
@@ -61,7 +93,7 @@ function parseItems(geminiResponse) {
         continue;
       }
 
-      items.push({ name, category: 1, unit, supplier: 1, price: totalPrice, quantity });
+      items.push({ name: slugifyName(name), category: 1, unit, supplier: 1, price: totalPrice, quantity });
     }
   }
 
