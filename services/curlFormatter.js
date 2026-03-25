@@ -224,8 +224,243 @@ function parseItems(geminiResponse) {
 }
 
 /**
- * Send all parsed items to localhost:8000 API
- * Returns a summary message of results
+ * Parse a free-form text receipt where each line looks like:
+ *   <item name> <quantity+unit> <price> [manat|azn]
+ *
+ * Rules:
+ *   - Price  = rightmost standalone number (optionally followed by manat/azn)
+ *   - Qty+unit = rightmost token of the form  <number><unit>  OR  just <number>
+ *                before the price token
+ *     Units recognised: kg, kq, g, qr, gr, qram, l, litr, ml, pcs, eded, əd
+ *     If no unit → quantity is the number, unit = "pcs"
+ *     gram-based units (g/qr/gr/qram) are stored as kg (÷1000)
+ *   - Everything to the left = item name
+ *   - Unit price = totalPrice / quantity
+ *
+ * Examples:
+ *   "xlor 3kg 300 manat"        → name=xlor,      qty=3,    unit=kg,  price=100
+ *   "sosiska 300gr 400 manat"   → name=sosiska,   qty=0.3,  unit=kg,  price=1333.33
+ *   "pepsi 05 sok 12 12 manat"  → name=pepsi-05-sok, qty=12, unit=pcs, price=1
+ *   "sut 2l 5 manat"            → name=sut,        qty=2,   unit=l,   price=2.5
+ *
+ * @param {string} text - multi-line WhatsApp message
+ * @returns {{ name:string, category:number, unit:string, supplier:number, price:number, quantity:number }[]}
+ */
+export function parseTextReceipt(text) {
+  // Token: number glued to a weight/volume unit  e.g. "3kg", "300gr", "0.5l", "2kq"
+  const QTY_UNIT_RE = /^(\d+(?:[.,]\d+)?)(kg|kq|g|qr|gr|qram|l|litr|ml|pcs|eded|əd|ədəd)\.?$/i;
+
+  // Price token: a number optionally glued to ANY currency-like suffix
+  // Covers: "300", "13.5man", "300manat", "12azn", "450m", "450₼", "450 manat"
+  const PRICE_TOKEN_RE = /^(\d+(?:[.,]\d+)?)(manat|man|azn|m|₼)?\.?$/i;
+
+  // Pure currency words to skip when searching for price number
+  const SKIP_WORDS = new Set(["manat", "azn", "man", "m", "₼"]);
+
+  // A token that is ONLY a unit word (should never be mistaken for a price)
+  const UNIT_ONLY_RE = /^(kg|kq|g|qr|gr|qram|l|litr|ml|pcs|eded|əd|ədəd)\.?$/i;
+
+  const items = [];
+
+  for (const rawLine of text.split("\n")) {
+    // Strip WhatsApp-style timestamp prefixes like "[25.03.26, 16:19:05] Name: "
+    const line = rawLine.replace(/^\[.*?\]\s*[^:]+:\s*/, "").trim();
+    if (!line) continue;
+
+    // Tokenise on whitespace; also strip trailing punctuation from each token
+    const tokens = line.split(/\s+/).map((t) => t.replace(/[,;]+$/, ""));
+    if (tokens.length < 2) continue;
+
+    // ── 1. Find price ────────────────────────────────────────────────────────
+    // Rightmost token that looks like a number (with optional currency suffix).
+    // Skip pure currency words and pure unit words.
+    let priceIdx  = -1;
+    let totalPrice = 0;
+
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      const t = tokens[i];
+      if (SKIP_WORDS.has(t.toLowerCase())) continue;
+      if (UNIT_ONLY_RE.test(t))            continue;
+      if (QTY_UNIT_RE.test(t))             continue; // qty token, not a price
+
+      const pm = t.match(PRICE_TOKEN_RE);
+      if (pm) {
+        priceIdx   = i;
+        totalPrice = parseFloat(pm[1].replace(",", "."));
+        break;
+      }
+    }
+    if (priceIdx < 0 || totalPrice <= 0) continue;
+
+    // ── 2. Find quantity + unit ───────────────────────────────────────────────
+    // Search rightward-to-left before the price token.
+    let qtyIdx   = -1;
+    let quantity  = 0;
+    let unit      = "pcs";
+
+    for (let i = priceIdx - 1; i >= 0; i--) {
+      const t = tokens[i];
+
+      // Case A: number glued to unit  e.g. "3kg", "300gr"
+      const quMatch = t.match(QTY_UNIT_RE);
+      if (quMatch) {
+        const val     = parseFloat(quMatch[1].replace(",", "."));
+        const rawUnit = quMatch[2].toLowerCase();
+
+        if (rawUnit === "g" || rawUnit === "qr" || rawUnit === "gr" || rawUnit === "qram") {
+          quantity = parseFloat((val / 1000).toFixed(4));
+          unit     = "kg";
+        } else {
+          quantity = val;
+          unit     = normaliseUnit(rawUnit);
+        }
+        qtyIdx = i;
+        break;
+      }
+
+      // Case B: bare number followed immediately by a unit word as separate token
+      //   e.g. "30 kg"  →  tokens[i]="30", tokens[i+1]="kg"
+      const bareMatch = t.match(/^(\d+(?:[.,]\d+)?)\.?$/);
+      if (bareMatch && i + 1 < priceIdx) {
+        const nextToken = tokens[i + 1];
+        const unitMatch = nextToken.match(UNIT_ONLY_RE);
+        if (unitMatch) {
+          const val     = parseFloat(bareMatch[1].replace(",", "."));
+          const rawUnit = unitMatch[0].toLowerCase().replace(/\.$/, "");
+          if (rawUnit === "g" || rawUnit === "qr" || rawUnit === "gr" || rawUnit === "qram") {
+            quantity = parseFloat((val / 1000).toFixed(4));
+            unit     = "kg";
+          } else {
+            quantity = val;
+            unit     = normaliseUnit(rawUnit);
+          }
+          qtyIdx = i; // name ends before i; i+1 is the unit word (skip it in name)
+          break;
+        }
+      }
+
+      // Case C: bare number directly before price → count (pcs)
+      if (bareMatch && i === priceIdx - 1) {
+        quantity = parseFloat(bareMatch[1].replace(",", "."));
+        unit     = "pcs";
+        qtyIdx   = i;
+        break;
+      }
+    }
+
+    if (qtyIdx < 0 || quantity <= 0) continue;
+
+    // ── 3. Item name = tokens before the qty token ────────────────────────────
+    // If Case B (separate unit word), skip tokens[qtyIdx+1] from the name too.
+    const unitIsNextToken =
+      qtyIdx + 1 < priceIdx && UNIT_ONLY_RE.test(tokens[qtyIdx + 1]);
+    const nameEnd = unitIsNextToken ? qtyIdx : qtyIdx; // same index; name = [0, qtyIdx)
+    const nameParts = tokens.slice(0, nameEnd);
+    if (nameParts.length === 0) continue;
+
+    // ── 4. Unit price ─────────────────────────────────────────────────────────
+    const unitPrice = parseFloat((totalPrice / quantity).toFixed(4));
+
+    items.push({
+      name:     slugifyName(nameParts.join(" ")),
+      category: 1,
+      unit,
+      supplier: 1,
+      price:    unitPrice,
+      quantity,
+    });
+  }
+
+  return items;
+}
+
+/**
+ * Detect whether a plain-text message looks like a text receipt.
+ * Requires at least one line that has a price-like number (optionally followed
+ * by manat/azn) and a quantity/unit somewhere before it.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function isTextReceipt(text) {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return false;
+
+  // A line qualifies if it contains a price token (number optionally glued to
+  // any currency suffix incl. short "m") AND either a qty+unit token OR two numbers
+  const PRICE_RE    = /\d+(?:[.,]\d+)?(manat|man|azn|m|₼)?(\s|$)/i;
+  const QTY_UNIT_RE = /\d+(?:[.,]\d+)?\s*(kg|kq|g|qr|gr|qram|l|litr|ml|pcs|eded)/i;
+  const TWO_NUMS_RE = /\d+\S*\s+\S*\d+/;
+
+  let qualifyingLines = 0;
+  for (const line of lines) {
+    if (PRICE_RE.test(line) && (QTY_UNIT_RE.test(line) || TWO_NUMS_RE.test(line))) {
+      qualifyingLines++;
+    }
+  }
+  // At least half the non-empty lines must qualify (handles mixed messages)
+  return qualifyingLines > 0 && qualifyingLines >= Math.ceil(lines.length / 2);
+}
+
+/**
+ * Send parsed text-receipt items to the API (same pipeline as image receipts).
+ * Fetches existing inventory, fuzzy-matches names, then POSTs each item.
+ *
+ * @param {string} text - raw WhatsApp text message
+ * @returns {Promise<string|null>} summary message
+ */
+export async function sendTextReceiptToApi(text) {
+  const items = parseTextReceipt(text);
+  if (items.length === 0) return null;
+
+  // Fetch existing inventory once for the whole batch
+  const existingItems = await fetchExistingItems();
+
+  // Resolve each item name against the API inventory (same fuzzy logic)
+  for (const item of items) {
+    const match = findBestMatch(item.name, existingItems);
+    if (match) item.name = match;
+  }
+
+  const results = { success: [], failed: [] };
+
+  for (const item of items) {
+    try {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item),
+      });
+
+      if (response.ok) {
+        console.log(`✅ API: Sent "${item.name}" → ${response.status}`);
+        results.success.push(`${item.name} (${item.quantity} ${item.unit} @ ${item.price})`);
+      } else {
+        const errorText = await response.text();
+        console.error(`❌ API: Failed "${item.name}" → ${response.status}: ${errorText}`);
+        results.failed.push(`${item.name} (${response.status})`);
+      }
+    } catch (err) {
+      console.error(`❌ API: Network error for "${item.name}":`, err.message);
+      results.failed.push(`${item.name} (network error)`);
+    }
+  }
+
+  let summary = `📝 *Mətn Qəbzi — API Nəticəsi*\n`;
+  summary += `✅ Uğurlu: ${results.success.length}/${items.length}\n`;
+  if (results.success.length > 0) {
+    summary += results.success.map((n) => `  • ${n}`).join("\n") + "\n";
+  }
+  if (results.failed.length > 0) {
+    summary += `❌ Uğursuz:\n`;
+    summary += results.failed.map((n) => `  • ${n}`).join("\n");
+  }
+  return summary;
+}
+
+/**
+ * Send all parsed image-receipt items to localhost:8000 API.
+ * Returns a summary message of results.
  */
 export async function sendItemsToApi(geminiResponse) {
   const items = parseItems(geminiResponse);

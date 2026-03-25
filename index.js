@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 import qrcode from "qrcode-terminal";
 import pkg from "whatsapp-web.js";
 import { createCSVBuffer, formatAsCSV } from "./services/csvFormatter.js";
-import { generateCurlForItems, sendItemsToApi } from "./services/curlFormatter.js";
+import { generateCurlForItems, isTextReceipt, sendItemsToApi, sendTextReceiptToApi } from "./services/curlFormatter.js";
 import { processReceiptImage } from "./services/imageProcessor.js";
 const { Client, LocalAuth, MessageMedia } = pkg;
 
@@ -162,6 +162,11 @@ client.on("message", async (message) => {
 2. Bot şəkli emal edəcək
 3. Mətn formatında cavab alacaqsınız
 
+*Mətn qəbzi nümunəsi:*
+  xlor 3kg 300 manat
+  sosiska 300gr 400 manat
+  pepsi 12 12 manat
+
 *Tövsiyələr:*
 ✓ Şəkil aydın olsun
 ✓ Mətn oxunaqlı olsun
@@ -171,6 +176,24 @@ client.on("message", async (message) => {
 Sualınız varsa *!help* yazın.
             `;
       await message.reply(helpMessage.trim());
+
+    } else if (isTextReceipt(message.body)) {
+      // ── Plain-text receipt ──────────────────────────────────────────────
+      console.log(`📝 Received text receipt from ${message.from}`);
+      await message.reply("📝 Mətn qəbzi alındı. Emal olunur...");
+
+      try {
+        const apiSummary = await sendTextReceiptToApi(message.body);
+        if (apiSummary) {
+          await message.reply(apiSummary);
+          console.log(`📡 Text receipt items sent to API for ${message.from}`);
+        } else {
+          await message.reply("⚠️ Heç bir məhsul aşkar edilmədi. Formatı yoxlayın.");
+        }
+      } catch (err) {
+        console.error("❌ Text receipt API error:", err);
+        await message.reply("❌ API xətası baş verdi. Zəhmət olmasa yenidən cəhd edin.");
+      }
     }
   } catch (error) {
     console.error("❌ Error processing message:", error);
