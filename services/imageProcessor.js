@@ -67,9 +67,9 @@ async function processWithGemini(imageData, mimeType, retryCount = 0) {
 
 📝 MƏHSULLAR:
 
-| Məhsul | Miqdar | Vahid | Cəm |
-|--------|--------|-------|-----|
-| [ad] | [miqdar] | [vahid] | [cəm] |
+| Məhsul | Miqdar | Vahid | Vahid Qiymət |
+|--------|--------|-------|--------------|
+| [ad] | [miqdar] | [vahid] | [vahid qiymət] |
 
 💰 CƏMİ: [toplam] AZN
 
@@ -102,10 +102,17 @@ async function processWithGemini(imageData, mimeType, retryCount = 0) {
      → "SARIKOK SIRLANKA KQ" → Ölçü vahidi = kq   → Vahid = kq
      → "TAMAT TARAVAT 1.450" → Ölçü vahidi = eded → Vahid = eded
 
-4. CƏM:
-   - Qəbzdəki "Məbləğ" / "Ümumi məbləğ" sütunundakı rəqəmi olduğu kimi yaz.
+4. VAHİD QİYMƏT — 1 vahidin qiyməti (unit price):
+   - Qəbzdəki "Qiymət" / "Vahid qiymət" / "Qiy." sütunundakı rəqəmi yaz.
+   - Bu ümumi/cəm məbləğ DEYİL — 1 ədəd / 1 kq / 1 l üçün qiymətdir.
+   - Əgər qəbzdə yalnız ümumi məbləğ (Məbləğ / Cəm) varsa, vahid qiyməti özün hesabla:
+       Vahid qiymət = Ümumi məbləğ ÷ Miqdar
    - Rəqəmləri DƏQİQ oxu, kəsr hissəsi nöqtə ilə (məsələn: 5.40, 19.68).
-   - AZN sözünü yazma, yalnız rəqəm.`;
+   - AZN sözünü yazma, yalnız rəqəm.
+   - Nümunələr:
+     → Miqdar=5.000 kq, Ümumi=27.00  → Vahid qiymət = 5.40
+     → Miqdar=3 eded, Ümumi=8.10     → Vahid qiymət = 2.70
+     → Miqdar=1 eded, Qiymət=12.50   → Vahid qiymət = 12.50`;
 
     const imageParts = [
       {

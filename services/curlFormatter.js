@@ -177,7 +177,8 @@ function findBestMatch(newName, existingItems, threshold = 0.85) {
 
 /**
  * Parse items from Gemini table response.
- * Gemini returns 4 columns: Məhsul | Miqdar | Vahid | Cəm
+ * Gemini returns 4 columns: Məhsul | Miqdar | Vahid | Vahid Qiymət
+ * The 4th column is already the unit price (price per 1 unit/kg/l).
  * Falls back gracefully to 3-column legacy format.
  */
 function parseItems(geminiResponse) {
@@ -190,6 +191,7 @@ function parseItems(geminiResponse) {
       !line.toLowerCase().includes("məhsul") &&
       !line.toLowerCase().includes("miqdar") &&
       !line.toLowerCase().includes("say") &&
+      !line.toLowerCase().includes("vahid qiymət") &&
       !line.includes("---")
     ) {
       const parts = line
@@ -197,26 +199,25 @@ function parseItems(geminiResponse) {
         .map((p) => p.trim())
         .filter((p) => p.length > 0);
 
-      let name, quantity, unit, totalPrice;
+      let name, quantity, unit, unitPrice;
 
       if (parts.length >= 4) {
-        // New 4-column format: Məhsul | Miqdar | Vahid | Cəm
-        name       = parts[0];
-        quantity   = parseFloat(parts[1].replace(",", ".")) || 1;
-        unit       = normaliseUnit(parts[2]);
-        totalPrice = parseFloat(parts[3].replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
+        // 4-column format: Məhsul | Miqdar | Vahid | Vahid Qiymət (unit price)
+        name      = parts[0];
+        quantity  = parseFloat(parts[1].replace(",", ".")) || 1;
+        unit      = normaliseUnit(parts[2]);
+        unitPrice = parseFloat(parts[3].replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
       } else if (parts.length === 3) {
-        // Legacy 3-column format: Məhsul | Say | Cəm — default to pcs
-        name       = parts[0];
-        quantity   = parseFloat(parts[1].replace(",", ".")) || 1;
-        unit       = "pcs";
-        totalPrice = parseFloat(parts[2].replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
+        // Legacy 3-column format: Məhsul | Say | Qiymət — default to pcs
+        name      = parts[0];
+        quantity  = parseFloat(parts[1].replace(",", ".")) || 1;
+        unit      = "pcs";
+        unitPrice = parseFloat(parts[2].replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
       } else {
         continue;
       }
 
-      // name will be resolved against the API list in sendItemsToApi
-      items.push({ name: slugifyName(name), category: 1, unit, supplier: 1, price: totalPrice, quantity });
+      items.push({ name: slugifyName(name), category: 1, unit, supplier: 1, price: unitPrice, quantity });
     }
   }
 
@@ -511,6 +512,146 @@ export async function sendItemsToApi(geminiResponse) {
     summary += results.failed.map((n) => `  • ${n}`).join("\n");
   }
 
+  return summary;
+}
+
+/**
+ * Convert a list of parsed items back into the editable text receipt format
+ * that parseTextReceipt() can parse again.
+ *
+ * Each line:
+ *   <name (spaces restored from hyphens)> <quantity><unit> <price*qty> manat
+ *
+ * Examples:
+ *   { name:"xlor", qty:3, unit:"kg", price:100 }
+ *     → "xlor 3kg 300 manat"
+ *   { name:"Fruktoviy-Sad-Portagal", qty:12, unit:"pcs", price:1 }
+ *     → "Fruktoviy Sad Portagal 12 12 manat"
+ *   { name:"sosiska-seher", qty:0.3, unit:"kg", price:1333.3333 }
+ *     → "sosiska seher 300gr 400 manat"
+ *
+ * @param {{ name:string, unit:string, price:number, quantity:number }[]} items
+ * @returns {string}
+ */
+export function itemsToText(items) {
+  // Build raw columns first so we can measure max widths
+  const rows = items.map((item) => {
+    const displayName = item.name.replace(/-/g, " ");
+    const totalPrice  = parseFloat(item.price.toFixed(2));
+
+    let qtyUnit;
+    if (item.unit === "kg") {
+      if (item.quantity < 1) {
+        const grams = Math.round(item.quantity * 1000);
+        qtyUnit = `${grams}gr`;
+      } else {
+        qtyUnit = `${item.quantity}kg`;
+      }
+    } else if (item.unit === "g") {
+      qtyUnit = `${item.quantity}g`;
+    } else if (item.unit === "l") {
+      qtyUnit = `${item.quantity}l`;
+    } else if (item.unit === "ml") {
+      qtyUnit = `${item.quantity}ml`;
+    } else {
+      qtyUnit = `${item.quantity}`;
+    }
+
+    return { displayName, qtyUnit, totalPrice: String(totalPrice) };
+  });
+
+  // Column widths (minimum 1)
+  const nameW  = Math.max(...rows.map((r) => r.displayName.length), 1);
+  const qtyW   = Math.max(...rows.map((r) => r.qtyUnit.length), 1);
+  const priceW = Math.max(...rows.map((r) => r.totalPrice.length), 1);
+
+  return rows
+    .map(({ displayName, qtyUnit, totalPrice }) => {
+      const name  = displayName.padEnd(nameW);
+      const qty   = qtyUnit.padStart(qtyW);
+      const price = totalPrice.padStart(priceW);
+      return `${name}   ${qty}   ${price} manat`;
+    })
+    .join("\n");
+}
+
+/**
+ * Parse items from a text receipt string and return them together with
+ * the editable text representation (for the confirmation workflow).
+ *
+ * @param {string} text
+ * @returns {{ items: object[], editableText: string }}
+ */
+export function parseTextReceiptWithPreview(text) {
+  const items = parseTextReceipt(text);
+  const editableText = itemsToText(items);
+  return { items, editableText };
+}
+
+/**
+ * Parse items from a Gemini image-receipt response and return them together
+ * with the editable text representation (for the confirmation workflow).
+ *
+ * @param {string} geminiResponse
+ * @returns {{ items: object[], editableText: string }}
+ */
+export function parseImageReceiptWithPreview(geminiResponse) {
+  const items = parseItems(geminiResponse);
+  const editableText = itemsToText(items);
+  return { items, editableText };
+}
+
+/**
+ * Send a pre-parsed list of items to the API (shared by both image and text
+ * confirmation paths).  Fetches existing inventory for fuzzy-matching, then
+ * POSTs each item.
+ *
+ * @param {{ name:string, category:number, unit:string, supplier:number, price:number, quantity:number }[]} items
+ * @returns {Promise<string>} human-readable summary
+ */
+export async function sendParsedItemsToApi(items) {
+  if (items.length === 0) return "⚠️ Heç bir məhsul tapılmadı.";
+
+  const existingItems = await fetchExistingItems();
+
+  for (const item of items) {
+    const match = findBestMatch(item.name, existingItems);
+    if (match) item.name = match;
+  }
+
+  const results = { success: [], failed: [] };
+
+  for (const item of items) {
+    try {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item),
+      });
+
+      if (response.ok) {
+        console.log(`✅ API: Sent "${item.name}" → ${response.status}`);
+        results.success.push(`${item.name} (${item.quantity} ${item.unit} @ ${item.price})`);
+      } else {
+        const errorText = await response.text();
+        console.error(`❌ API: Failed "${item.name}" → ${response.status}: ${errorText}`);
+        results.failed.push(`${item.name} (${response.status})`);
+      }
+    } catch (err) {
+      console.error(`❌ API: Network error for "${item.name}":`, err.message);
+      results.failed.push(`${item.name} (network error)`);
+    }
+  }
+
+  let summary = `📡 *API Nəticəsi*\n`;
+  summary += `✅ Uğurlu: ${results.success.length}/${items.length}\n`;
+  if (results.success.length > 0) {
+    summary += results.success.map((n) => `  • ${n}`).join("\n") + "\n";
+  }
+  if (results.failed.length > 0) {
+    summary += `❌ Uğursuz:\n`;
+    summary += results.failed.map((n) => `  • ${n}`).join("\n");
+  }
   return summary;
 }
 
