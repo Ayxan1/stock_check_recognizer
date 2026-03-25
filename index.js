@@ -4,6 +4,7 @@ import express from "express";
 import qrcode from "qrcode-terminal";
 import pkg from "whatsapp-web.js";
 import {
+  applyLineEdit,
   isTextReceipt,
   parseImageReceiptWithPreview,
   parseTextReceiptWithPreview,
@@ -142,17 +143,20 @@ app.listen(HTTP_PORT, () => {
 
 // ─── WhatsApp Client ──────────────────────────────────────────────────────────
 
-const ALLOWED_NUMBER = process.env.ALLOWED_NUMBER || "994777333003@c.us";
+const ALLOWED_NUMBERS = new Set([
+  process.env.ALLOWED_NUMBER || "994777333003@c.us",
+  "994776422241@c.us",
+]);
 
 /**
  * Per-user pending drafts.
- * Shape: Map<userId, { editableText: string, source: "image"|"text" }>
+ * Shape: Map<userId, { items: object[], editableText: string, source: "image"|"text" }>
  *
- * When a receipt is received (image or text), the bot parses it, converts
- * it to the editable text format, and stores it here.  The user can:
- *   • Reply "ok" / "bəli" / "göndər"   → parse stored text, send to API
- *   • Reply "ləğv" / "cancel" / "xeyr"  → discard draft
- *   • Reply with edited text            → update draft, re-show confirmation prompt
+ * When a receipt is received the bot parses it, stores the items array here,
+ * and shows a numbered list. The user can:
+ *   • Reply "ok" / "bəli" / "göndər"         → send stored items to API
+ *   • Reply "ləğv" / "xeyr" / "cancel"        → discard draft
+ *   • Reply "<N> <name> <qty><unit> <price>"   → replace line N, re-show list
  */
 const pendingDrafts = new Map();
 
@@ -215,15 +219,31 @@ client.on("disconnected", (reason) => {
 });
 
 // ─── Incoming Message Handler ─────────────────────────────────────────────────
+
+/** Build the confirmation prompt shown after every draft update. */
+function draftPrompt(editableText, count) {
+  return (
+    `📋 *Aşkar edilən məhsullar (${count} ədəd):*\n\n` +
+    `${editableText}\n\n` +
+    `✏️ Düzəliş: sətir nömrəsini yazın, sonra yeni dəyər\n` +
+    `_Nümunə: *2 sosiska seher 300gr 55 manat*_\n\n` +
+    `✅ Göndərmək üçün *ok* yazın\n` +
+    `❌ İmtina etmək üçün *ləğv* yazın`
+  );
+}
+
 client.on("message", async (message) => {
   try {
-    if (message.from !== ALLOWED_NUMBER) {
+    if (!ALLOWED_NUMBERS.has(message.from)) {
       console.log(`🚫 Ignored message from ${message.from}`);
       return;
     }
 
     const userId   = message.from;
-    const bodyLow  = (message.body || "").trim().toLowerCase();
+    // Strip invisible Unicode characters (zero-width spaces, joiners, etc.)
+    // that WhatsApp mobile keyboards can inject.
+    const bodyTrim = (message.body || "").replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, "").trim();
+    const bodyLow  = bodyTrim.toLowerCase();
     const hasDraft = pendingDrafts.has(userId);
 
     // ── Help command ─────────────────────────────────────────────────────────
@@ -235,15 +255,16 @@ client.on("message", async (message) => {
 2. Mətn formatında qəbz göndərin
 
 *Mətn qəbzi nümunəsi:*
-  xlor 3kg 300 manat
-  sosiska 300gr 400 manat
-  pepsi 12 12 manat
+  xlor 3kg 100 manat
+  sosiska 300gr 50 manat
+  pepsi 12 1 manat
 
 *Təsdiq addımı:*
-  • Bot məhsulları göstərəcək
-  • *ok* / *bəli* / *göndər* yazın → API-yə göndər
-  • *ləğv* / *xeyr* / *cancel* yazın → imtina
-  • Siyahını redaktə edib göndərin → yeni baxış
+  • Bot nömrəli siyahı göstərəcək
+  • Düzəliş: sətir nömrəsi + yeni dəyər yazın
+    _Nümunə: 2 sosiska seher 300gr 55 manat_
+  • *ok* / *bəli* yazın → API-yə göndər
+  • *ləğv* / *xeyr* yazın → imtina
 
 Sualınız varsa *!help* yazın.`);
       return;
@@ -257,12 +278,7 @@ Sualınız varsa *!help* yazın.`);
       await message.reply("📡 Məhsullar API-yə göndərilir...");
 
       try {
-        const { items } = parseTextReceiptWithPreview(draft.editableText);
-        if (items.length === 0) {
-          await message.reply("⚠️ Heç bir məhsul aşkar edilmədi. Siyahını yoxlayın.");
-          return;
-        }
-        const summary = await sendParsedItemsToApi(items);
+        const summary = await sendParsedItemsToApi(draft.items);
         await message.reply(summary);
         console.log(`✅ Draft confirmed and sent to API for ${userId}`);
       } catch (err) {
@@ -278,6 +294,35 @@ Sualınız varsa *!help* yazın.`);
       await message.reply("🚫 Qəbz ləğv edildi. Yeni qəbz göndərə bilərsiniz.");
       console.log(`🚫 Draft cancelled for ${userId}`);
       return;
+    }
+
+    // ── Inline line-edit: "<N> <name> <qty><unit> <price> manat" ────────────
+    // Also accepts the display format with a dot: "2. name | qty | price manat"
+    if (hasDraft) {
+      const lineEditMatch = bodyTrim.match(/^(\d+)\.?\s+(.+)$/s);
+      if (lineEditMatch) {
+        const lineNum  = parseInt(lineEditMatch[1], 10);
+        const lineText = lineEditMatch[2].trim();
+        const draft    = pendingDrafts.get(userId);
+
+        console.log(`✏️ Line-edit attempt: line=${lineNum}, text="${lineText}", draft items=${draft.items.length}`);
+
+        const result = applyLineEdit(draft.items, lineNum, lineText);
+
+        if (!result.ok) {
+          await message.reply(result.error);
+          return;
+        }
+
+        console.log(`✏️ Line-edit success: result items=${result.items.length}`);
+        pendingDrafts.set(userId, { items: result.items, editableText: result.editableText, source: draft.source });
+        console.log(`✏️ Line ${lineNum} updated in draft for ${userId}`);
+        await message.reply(
+          `✏️ *${lineNum}-ci sətir yeniləndi:*\n\n` +
+          draftPrompt(result.editableText, result.items.length)
+        );
+        return;
+      }
     }
 
     // ── Image receipt ────────────────────────────────────────────────────────
@@ -303,63 +348,42 @@ Sualınız varsa *!help* yazın.`);
         return;
       }
 
-      pendingDrafts.set(userId, { editableText, source: "image" });
+      pendingDrafts.set(userId, { items, editableText, source: "image" });
       console.log(`📝 Image draft stored for ${userId} (${items.length} items)`);
-
-      await message.reply(
-        `📋 *Aşkar edilən məhsullar (${items.length} ədəd):*\n\n` +
-        `${editableText}\n\n` +
-        `✏️ Siyahını redaktə edə bilərsiniz.\n` +
-        `✅ Göndərmək üçün *ok* yazın\n` +
-        `❌ İmtina etmək üçün *ləğv* yazın`
-      );
+      await message.reply(draftPrompt(editableText, items.length));
       return;
     }
 
-    // ── Edited draft reply ────────────────────────────────────────────────────
-    // If user has a pending draft and sends a new text receipt, treat it as an edit.
-    if (hasDraft && isTextReceipt(message.body)) {
-      const { items, editableText } = parseTextReceiptWithPreview(message.body);
+    // ── Edited draft: user resends a full text receipt while draft is pending ─
+    if (hasDraft && isTextReceipt(bodyTrim)) {
+      const { items, editableText } = parseTextReceiptWithPreview(bodyTrim);
 
       if (items.length === 0) {
-        await message.reply("⚠️ Göndərdiyiniz mətn qəbz kimi tanınmadı. Formatı yoxlayın.\n\nMövcud siyahı hələ də gözləyir. *ok* / *ləğv* yazın.");
+        await message.reply("⚠️ Göndərdiyiniz mətn qəbz kimi tanınmadı. Formatı yoxlayın.\n\nMövcud siyahı hələ gözləyir. *ok* / *ləğv* yazın.");
         return;
       }
 
-      pendingDrafts.set(userId, { editableText, source: "text" });
-      console.log(`✏️ Draft updated for ${userId} (${items.length} items)`);
-
-      await message.reply(
-        `✏️ *Yenilənmiş siyahı (${items.length} ədəd):*\n\n` +
-        `${editableText}\n\n` +
-        `✅ Göndərmək üçün *ok* yazın\n` +
-        `❌ İmtina etmək üçün *ləğv* yazın`
-      );
+      pendingDrafts.set(userId, { items, editableText, source: "text" });
+      console.log(`✏️ Draft replaced for ${userId} (${items.length} items)`);
+      await message.reply(`✏️ *Siyahı yeniləndi:*\n\n` + draftPrompt(editableText, items.length));
       return;
     }
 
     // ── Fresh text receipt (no pending draft) ────────────────────────────────
-    if (isTextReceipt(message.body)) {
+    if (isTextReceipt(bodyTrim)) {
       console.log(`📝 Received text receipt from ${userId}`);
       await message.reply("📝 Mətn qəbzi alındı. Emal olunur...");
 
-      const { items, editableText } = parseTextReceiptWithPreview(message.body);
+      const { items, editableText } = parseTextReceiptWithPreview(bodyTrim);
 
       if (items.length === 0) {
         await message.reply("⚠️ Heç bir məhsul aşkar edilmədi. Formatı yoxlayın.");
         return;
       }
 
-      pendingDrafts.set(userId, { editableText, source: "text" });
+      pendingDrafts.set(userId, { items, editableText, source: "text" });
       console.log(`📝 Text draft stored for ${userId} (${items.length} items)`);
-
-      await message.reply(
-        `📋 *Aşkar edilən məhsullar (${items.length} ədəd):*\n\n` +
-        `${editableText}\n\n` +
-        `✏️ Siyahını redaktə edə bilərsiniz.\n` +
-        `✅ Göndərmək üçün *ok* yazın\n` +
-        `❌ İmtina etmək üçün *ləğv* yazın`
-      );
+      await message.reply(draftPrompt(editableText, items.length));
       return;
     }
 
@@ -368,9 +392,7 @@ Sualınız varsa *!help* yazın.`);
       const draft = pendingDrafts.get(userId);
       await message.reply(
         `⚠️ Mesaj tanınmadı. Mövcud siyahı hələ gözləyir:\n\n` +
-        `${draft.editableText}\n\n` +
-        `✅ Göndərmək üçün *ok* yazın\n` +
-        `❌ İmtina etmək üçün *ləğv* yazın`
+        draftPrompt(draft.editableText, draft.items.length)
       );
     }
 

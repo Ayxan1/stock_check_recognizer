@@ -248,6 +248,10 @@ function parseItems(geminiResponse) {
  * @returns {{ name:string, category:number, unit:string, supplier:number, price:number, quantity:number }[]}
  */
 export function parseTextReceipt(text) {
+  // Strip invisible Unicode characters (zero-width spaces, joiners, BOM, soft-hyphen)
+  // that WhatsApp mobile keyboards can inject into messages.
+  const cleanText = text.replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, "");
+
   // Token: number glued to a weight/volume unit  e.g. "3kg", "300gr", "0.5l", "2kq"
   const QTY_UNIT_RE = /^(\d+(?:[.,]\d+)?)(kg|kq|g|qr|gr|qram|l|litr|ml|pcs|eded|əd|ədəd)\.?$/i;
 
@@ -263,9 +267,13 @@ export function parseTextReceipt(text) {
 
   const items = [];
 
-  for (const rawLine of text.split("\n")) {
+  for (const rawLine of cleanText.split("\n")) {
     // Strip WhatsApp-style timestamp prefixes like "[25.03.26, 16:19:05] Name: "
-    const line = rawLine.replace(/^\[.*?\]\s*[^:]+:\s*/, "").trim();
+    // Also strip pipe separators from the numbered display format (e.g. "| 1kg | 3 manat")
+    const line = rawLine
+      .replace(/^\[.*?\]\s*[^:]+:\s*/, "")
+      .replace(/\s*\|\s*/g, " ")
+      .trim();
     if (!line) continue;
 
     // Tokenise on whitespace; also strip trailing punctuation from each token
@@ -533,51 +541,81 @@ export async function sendItemsToApi(geminiResponse) {
  * @param {{ name:string, unit:string, price:number, quantity:number }[]} items
  * @returns {string}
  */
-export function itemsToText(items) {
-  // Build raw columns first so we can measure max widths
-  const rows = items.map((item) => {
-    const displayName = item.name.replace(/-/g, " ");
-    const totalPrice  = parseFloat(item.price.toFixed(2));
+/**
+ * Format a single item as the editable text-receipt line (no number prefix).
+ * Format: "<name> <qty><unit> <price> manat"
+ * This is what parseTextReceipt() can parse back.
+ *
+ * @param {{ name:string, unit:string, price:number, quantity:number }} item
+ * @returns {string}
+ */
+export function itemToLine(item) {
+  const displayName = item.name.replace(/-/g, " ");
+  const unitPrice   = parseFloat(item.price.toFixed(2));
 
-    let qtyUnit;
-    if (item.unit === "kg") {
-      if (item.quantity < 1) {
-        const grams = Math.round(item.quantity * 1000);
-        qtyUnit = `${grams}gr`;
-      } else {
-        qtyUnit = `${item.quantity}kg`;
-      }
-    } else if (item.unit === "g") {
-      qtyUnit = `${item.quantity}g`;
-    } else if (item.unit === "l") {
-      qtyUnit = `${item.quantity}l`;
-    } else if (item.unit === "ml") {
-      qtyUnit = `${item.quantity}ml`;
+  let qtyUnit;
+  if (item.unit === "kg") {
+    if (item.quantity < 1) {
+      const grams = Math.round(item.quantity * 1000);
+      qtyUnit = `${grams}gr`;
     } else {
-      qtyUnit = `${item.quantity}`;
+      qtyUnit = `${item.quantity}kg`;
     }
+  } else if (item.unit === "g") {
+    qtyUnit = `${item.quantity}g`;
+  } else if (item.unit === "l") {
+    qtyUnit = `${item.quantity}l`;
+  } else if (item.unit === "ml") {
+    qtyUnit = `${item.quantity}ml`;
+  } else {
+    qtyUnit = `${item.quantity}`;
+  }
 
-    return { displayName, qtyUnit, totalPrice: String(totalPrice) };
-  });
+  return `${displayName} ${qtyUnit} ${unitPrice} manat`;
+}
 
-  // Column widths (minimum 1)
-  const nameW  = Math.max(...rows.map((r) => r.displayName.length), 1);
-  const qtyW   = Math.max(...rows.map((r) => r.qtyUnit.length), 1);
-  const priceW = Math.max(...rows.map((r) => r.totalPrice.length), 1);
+/**
+ * Convert a list of parsed items to a numbered display list with | separators.
+ * Each line: "<N>. <name> | <qty><unit> | <price> manat"
+ *
+ * The numbered format is shown to the user for editing convenience.
+ * The user can correct a line by typing: "<N> <name> <qty><unit> <price> manat"
+ *
+ * @param {{ name:string, unit:string, price:number, quantity:number }[]} items
+ * @returns {string}
+ */
+export function itemsToText(items) {
+  return items
+    .map((item, i) => {
+      const displayName = item.name.replace(/-/g, " ");
+      const unitPrice   = parseFloat(item.price.toFixed(2));
 
-  return rows
-    .map(({ displayName, qtyUnit, totalPrice }) => {
-      const name  = displayName.padEnd(nameW);
-      const qty   = qtyUnit.padStart(qtyW);
-      const price = totalPrice.padStart(priceW);
-      return `${name}   ${qty}   ${price} manat`;
+      let qtyUnit;
+      if (item.unit === "kg") {
+        if (item.quantity < 1) {
+          const grams = Math.round(item.quantity * 1000);
+          qtyUnit = `${grams}gr`;
+        } else {
+          qtyUnit = `${item.quantity}kg`;
+        }
+      } else if (item.unit === "g") {
+        qtyUnit = `${item.quantity}g`;
+      } else if (item.unit === "l") {
+        qtyUnit = `${item.quantity}l`;
+      } else if (item.unit === "ml") {
+        qtyUnit = `${item.quantity}ml`;
+      } else {
+        qtyUnit = `${item.quantity}`;
+      }
+
+      return `${i + 1}. ${displayName} | ${qtyUnit} | ${unitPrice} manat`;
     })
     .join("\n");
 }
 
 /**
  * Parse items from a text receipt string and return them together with
- * the editable text representation (for the confirmation workflow).
+ * the numbered display text (for the confirmation workflow).
  *
  * @param {string} text
  * @returns {{ items: object[], editableText: string }}
@@ -590,7 +628,7 @@ export function parseTextReceiptWithPreview(text) {
 
 /**
  * Parse items from a Gemini image-receipt response and return them together
- * with the editable text representation (for the confirmation workflow).
+ * with the numbered display text (for the confirmation workflow).
  *
  * @param {string} geminiResponse
  * @returns {{ items: object[], editableText: string }}
@@ -599,6 +637,43 @@ export function parseImageReceiptWithPreview(geminiResponse) {
   const items = parseItems(geminiResponse);
   const editableText = itemsToText(items);
   return { items, editableText };
+}
+
+/**
+ * Apply an inline line-edit command to a stored items array.
+ *
+ * The user sends: "<N> <name> <qty><unit> <price> manat"
+ * e.g. "2 sosiska seher 300gr 55 manat"
+ *
+ * Returns { ok: true, items, editableText } on success,
+ *         { ok: false, error } on failure.
+ *
+ * @param {object[]} items - current items array
+ * @param {number}   lineNum - 1-based line number to replace
+ * @param {string}   lineText - replacement line text (without the number prefix)
+ * @returns {{ ok: boolean, items?: object[], editableText?: string, error?: string }}
+ */
+export function applyLineEdit(items, lineNum, lineText) {
+  if (lineNum < 1 || lineNum > items.length) {
+    return { ok: false, error: `❌ ${lineNum} nömrəli sətir yoxdur. 1–${items.length} arasında rəqəm yazın.` };
+  }
+
+  // Strip invisible Unicode characters and pipe-separated display format
+  // if the user copied from the numbered list (e.g. "SABALID SOYULMUS 250qr | 1kg | 3 manat").
+  const normalised = lineText
+    .replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, "")
+    .replace(/\s*\|\s*/g, " ")
+    .trim();
+
+  const parsed = parseTextReceipt(normalised);
+  if (parsed.length === 0) {
+    return { ok: false, error: `❌ Format tanınmadı. Nümunə: *${lineNum} məhsul adı 3kg 100 manat*` };
+  }
+
+  // Deep-copy the FULL array then replace only the target line.
+  const newItems = items.map((item) => ({ ...item }));
+  newItems[lineNum - 1] = parsed[0];
+  return { ok: true, items: newItems, editableText: itemsToText(newItems) };
 }
 
 /**
@@ -612,16 +687,19 @@ export function parseImageReceiptWithPreview(geminiResponse) {
 export async function sendParsedItemsToApi(items) {
   if (items.length === 0) return "⚠️ Heç bir məhsul tapılmadı.";
 
+  // Deep-copy so fuzzy-matching does not mutate the caller's array
+  const workItems = items.map((item) => ({ ...item }));
+
   const existingItems = await fetchExistingItems();
 
-  for (const item of items) {
+  for (const item of workItems) {
     const match = findBestMatch(item.name, existingItems);
     if (match) item.name = match;
   }
 
   const results = { success: [], failed: [] };
 
-  for (const item of items) {
+  for (const item of workItems) {
     try {
       const response = await fetch(API_URL, {
         method: "POST",
