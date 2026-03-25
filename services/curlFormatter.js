@@ -542,6 +542,24 @@ export async function sendItemsToApi(geminiResponse) {
  * @returns {string}
  */
 /**
+ * Build the qty+unit display string for one item.
+ * pcs items show the explicit "pcs" suffix so the user knows what to type when editing.
+ */
+function fmtQtyUnit(item) {
+  const qty = item.quantity;
+  switch (item.unit) {
+    case "kg":
+      return qty < 1
+        ? `${Math.round(qty * 1000)}gr`
+        : `${qty}kg`;
+    case "g":   return `${qty}g`;
+    case "l":   return `${qty}l`;
+    case "ml":  return `${qty}ml`;
+    default:    return `${qty}pcs`;   // explicit "pcs" — parseable and clear
+  }
+}
+
+/**
  * Format a single item as the editable text-receipt line (no number prefix).
  * Format: "<name> <qty><unit> <price> manat"
  * This is what parseTextReceipt() can parse back.
@@ -552,26 +570,7 @@ export async function sendItemsToApi(geminiResponse) {
 export function itemToLine(item) {
   const displayName = item.name.replace(/-/g, " ");
   const unitPrice   = parseFloat(item.price.toFixed(2));
-
-  let qtyUnit;
-  if (item.unit === "kg") {
-    if (item.quantity < 1) {
-      const grams = Math.round(item.quantity * 1000);
-      qtyUnit = `${grams}gr`;
-    } else {
-      qtyUnit = `${item.quantity}kg`;
-    }
-  } else if (item.unit === "g") {
-    qtyUnit = `${item.quantity}g`;
-  } else if (item.unit === "l") {
-    qtyUnit = `${item.quantity}l`;
-  } else if (item.unit === "ml") {
-    qtyUnit = `${item.quantity}ml`;
-  } else {
-    qtyUnit = `${item.quantity}`;
-  }
-
-  return `${displayName} ${qtyUnit} ${unitPrice} manat`;
+  return `${displayName} ${fmtQtyUnit(item)} ${unitPrice} manat`;
 }
 
 /**
@@ -589,26 +588,7 @@ export function itemsToText(items) {
     .map((item, i) => {
       const displayName = item.name.replace(/-/g, " ");
       const unitPrice   = parseFloat(item.price.toFixed(2));
-
-      let qtyUnit;
-      if (item.unit === "kg") {
-        if (item.quantity < 1) {
-          const grams = Math.round(item.quantity * 1000);
-          qtyUnit = `${grams}gr`;
-        } else {
-          qtyUnit = `${item.quantity}kg`;
-        }
-      } else if (item.unit === "g") {
-        qtyUnit = `${item.quantity}g`;
-      } else if (item.unit === "l") {
-        qtyUnit = `${item.quantity}l`;
-      } else if (item.unit === "ml") {
-        qtyUnit = `${item.quantity}ml`;
-      } else {
-        qtyUnit = `${item.quantity}`;
-      }
-
-      return `${i + 1}. ${displayName} | ${qtyUnit} | ${unitPrice} manat`;
+      return `${i + 1}. ${displayName} | ${fmtQtyUnit(item)} | ${unitPrice} manat`;
     })
     .join("\n");
 }
@@ -674,6 +654,73 @@ export function applyLineEdit(items, lineNum, lineText) {
   const newItems = items.map((item) => ({ ...item }));
   newItems[lineNum - 1] = parsed[0];
   return { ok: true, items: newItems, editableText: itemsToText(newItems) };
+}
+
+/**
+ * Apply a batch of line-edit commands from a multi-line message.
+ *
+ * Each line of the message must start with a line number:
+ *   "1. Pepsi Cola 250ml*24 | 3pcs | 10.42 manat"
+ *   "2. Pepsi Cola 1 lt*12 | 8.4kg | 1.04 manat"
+ *
+ * Lines that don't start with a number are skipped.
+ * Returns the updated items array plus a summary of what changed.
+ *
+ * @param {object[]} items - current items array
+ * @param {string}   text  - raw multi-line message body
+ * @returns {{ ok: boolean, items?: object[], editableText?: string, changed?: number[], errors?: string[], error?: string }}
+ */
+export function applyBatchEdit(items, text) {
+  // Each line must start with a number (with optional dot)
+  const LINE_RE = /^(\d+)\.?\s+(.+)$/;
+
+  const cleanText = text.replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, "");
+  const msgLines  = cleanText.split("\n").map((l) => l.trim()).filter(Boolean);
+
+  // Only treat as a batch edit if EVERY non-empty line starts with a number
+  // (so a normal multi-line receipt isn't accidentally treated as a batch edit)
+  const editLines = msgLines.filter((l) => LINE_RE.test(l));
+  if (editLines.length === 0) {
+    return { ok: false, error: "Heç bir düzəliş sətiri tapılmadı." };
+  }
+  if (editLines.length !== msgLines.length) {
+    // Mixed message — some lines have numbers, some don't → not a batch edit
+    return { ok: false, error: "mixed" };
+  }
+
+  const newItems = items.map((item) => ({ ...item }));
+  const changed  = [];
+  const errors   = [];
+
+  for (const line of editLines) {
+    const m = line.match(LINE_RE);
+    if (!m) continue;
+
+    const lineNum = parseInt(m[1], 10);
+    const lineText = m[2]
+      .replace(/\s*\|\s*/g, " ")
+      .trim();
+
+    if (lineNum < 1 || lineNum > items.length) {
+      errors.push(`❌ Sətir ${lineNum} mövcud deyil (1–${items.length})`);
+      continue;
+    }
+
+    const parsed = parseTextReceipt(lineText);
+    if (parsed.length === 0) {
+      errors.push(`❌ Sətir ${lineNum}: format tanınmadı — "${lineText}"`);
+      continue;
+    }
+
+    newItems[lineNum - 1] = parsed[0];
+    changed.push(lineNum);
+  }
+
+  if (changed.length === 0) {
+    return { ok: false, errors };
+  }
+
+  return { ok: true, items: newItems, editableText: itemsToText(newItems), changed, errors };
 }
 
 /**
