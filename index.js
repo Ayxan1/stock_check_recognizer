@@ -180,7 +180,7 @@ client = new Client({
   authTimeoutMs: 60000,
   puppeteer: {
     headless: true,
-    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    executablePath: "/usr/bin/chromium-browser",
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
