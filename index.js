@@ -145,7 +145,7 @@ app.listen(HTTP_PORT, () => {
 // ─── WhatsApp Client ──────────────────────────────────────────────────────────
 
 const ALLOWED_NUMBERS = new Set([
-  process.env.ALLOWED_NUMBER || "994777333003@c.us",
+  process.env.ALLOWED_NUMBER || "994777333003@c.us", "994518000080@c.us",
   "994776422241@c.us",
 ]);
 
