@@ -180,16 +180,7 @@ client = new Client({
   authTimeoutMs: 60000,
   puppeteer: {
     headless: true,
-    executablePath: "/usr/bin/chromium-browser",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--no-first-run",
-      "--no-zygote",
-      "--disable-gpu",
-    ],
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
   },
 });
 
