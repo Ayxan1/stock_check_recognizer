@@ -145,7 +145,7 @@ app.listen(HTTP_PORT, () => {
 // ─── WhatsApp Client ──────────────────────────────────────────────────────────
 
 const ALLOWED_CONTACTS = new Set([
-  process.env.ALLOWED_CONTACTS || "Kamran Hajili", "Ruslan Müdür"
+  process.env.ALLOWED_CONTACTS || "Kamran Hajili", "t"
 ]);
 
 /**
