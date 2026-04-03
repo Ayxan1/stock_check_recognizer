@@ -1,5 +1,5 @@
-const API_URL      = "http://localhost:8000/api/inventory/inventory-items/add-or-update/";
-const API_LIST_URL = "http://localhost:8000/api/inventory/inventory-items/";
+const API_URL      = "http://localhost:8005/api/inventory/inventory-items/add-or-update/";
+const API_LIST_URL = "http://localhost:8005/api/inventory/inventory-items/";
 
 /**
  * Transliterate Azerbaijani / Turkish special characters to ASCII equivalents,

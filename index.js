@@ -144,9 +144,8 @@ app.listen(HTTP_PORT, () => {
 
 // ─── WhatsApp Client ──────────────────────────────────────────────────────────
 
-const ALLOWED_NUMBERS = new Set([
-  process.env.ALLOWED_NUMBER || "994777333003@c.us", "994518000080@c.us",
-  "994776422241@c.us",
+const ALLOWED_CONTACTS = new Set([
+  process.env.ALLOWED_CONTACTS || "Kamran Hajili", "Ruslan Müdür"
 ]);
 
 /**
@@ -303,7 +302,15 @@ async function sendDraftWithPoll(chatId, editableText, count) {
 
 client.on("message", async (message) => {
   try {
-    if (!ALLOWED_NUMBERS.has(message.from)) {
+
+    const senderInfo = {
+      from: message.from,            // WhatsApp ID (could be LID)
+      pushName: message._data?.notifyName || "N/A", // Display name if available
+      number: message._data?.id?.user || "N/A",     // Phone number part if exists
+    };
+    console.log("📩 Incoming message from:", senderInfo); // <-- log sender info
+
+    if (!ALLOWED_CONTACTS.has(senderInfo.pushName)) {
       console.log(`🚫 Ignored message from ${message.from}`);
       return;
     }
