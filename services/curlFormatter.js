@@ -1,4 +1,4 @@
-const API_URL      = "http://localhost:8000/api/inventory/inventory-items/add-or-update/";
+const API_URL = "http://localhost:8000/api/inventory/inventory-items/add-or-update/";
 const API_LIST_URL = "http://localhost:8000/api/inventory/inventory-items/";
 
 /**
@@ -15,16 +15,26 @@ const API_LIST_URL = "http://localhost:8000/api/inventory/inventory-items/";
  */
 function slugifyName(name) {
   const MAP = {
-    ə: "e", Ə: "E",
-    ö: "o", Ö: "O",
-    ü: "u", Ü: "U",
-    ğ: "g", Ğ: "G",
-    ı: "i", İ: "I",
-    ş: "s", Ş: "S",
-    ç: "c", Ç: "C",
-    â: "a", Â: "A",
-    î: "i", Î: "I",
-    û: "u", Û: "U",
+    ə: "e",
+    Ə: "E",
+    ö: "o",
+    Ö: "O",
+    ü: "u",
+    Ü: "U",
+    ğ: "g",
+    Ğ: "G",
+    ı: "i",
+    İ: "I",
+    ş: "s",
+    Ş: "S",
+    ç: "c",
+    Ç: "C",
+    â: "a",
+    Â: "A",
+    î: "i",
+    Î: "I",
+    û: "u",
+    Û: "U",
   };
 
   return name
@@ -43,11 +53,11 @@ function slugifyName(name) {
 function normaliseUnit(rawUnit) {
   const u = (rawUnit || "").toLowerCase().trim().replace(/\.$/, "");
 
-  if (u === "kq" || u === "kg")                         return "kg";
-  if (u === "g"  || u === "qr" || u === "gr" || u === "qram") return "g";
-  if (u === "ton" || u === "t")                         return "kg"; // treat ton as kg (value already large)
-  if (u === "l"  || u === "litr")                       return "l";
-  if (u === "ml")                                       return "ml";
+  if (u === "kq" || u === "kg") return "kg";
+  if (u === "g" || u === "qr" || u === "gr" || u === "qram") return "g";
+  if (u === "ton" || u === "t") return "kg"; // treat ton as kg (value already large)
+  if (u === "l" || u === "litr") return "l";
+  if (u === "ml") return "ml";
 
   // eded, əd, ədəd, ed, pcs, or anything else → piece-based
   return "pcs";
@@ -75,9 +85,26 @@ function normaliseUnit(rawUnit) {
  */
 function fingerprint(name) {
   const MAP = {
-    ə:"e",Ə:"E",ö:"o",Ö:"O",ü:"u",Ü:"U",
-    ğ:"g",Ğ:"G",ı:"i",İ:"I",ş:"s",Ş:"S",
-    ç:"c",Ç:"C",â:"a",Â:"A",î:"i",Î:"I",û:"u",Û:"U",
+    ə: "e",
+    Ə: "E",
+    ö: "o",
+    Ö: "O",
+    ü: "u",
+    Ü: "U",
+    ğ: "g",
+    Ğ: "G",
+    ı: "i",
+    İ: "I",
+    ş: "s",
+    Ş: "S",
+    ç: "c",
+    Ç: "C",
+    â: "a",
+    Â: "A",
+    î: "i",
+    Î: "I",
+    û: "u",
+    Û: "U",
   };
   const transliterated = name
     .replace(/[əƏöÖüÜğĞıİşŞçÇâÂîÎûÛ]/g, (ch) => MAP[ch] || ch)
@@ -156,14 +183,14 @@ function diceSimilarity(a, b) {
 function findBestMatch(newName, existingItems, threshold = 0.85) {
   const fpNew = fingerprint(newName);
   let bestScore = 0;
-  let bestName  = null;
+  let bestName = null;
 
   for (const item of existingItems) {
     const fpExisting = fingerprint(item.name);
     const score = diceSimilarity(fpNew, fpExisting);
     if (score > bestScore) {
       bestScore = score;
-      bestName  = item.name;
+      bestName = item.name;
     }
   }
 
@@ -203,21 +230,28 @@ function parseItems(geminiResponse) {
 
       if (parts.length >= 4) {
         // 4-column format: Məhsul | Miqdar | Vahid | Vahid Qiymət (unit price)
-        name      = parts[0];
-        quantity  = parseFloat(parts[1].replace(",", ".")) || 1;
-        unit      = normaliseUnit(parts[2]);
+        name = parts[0];
+        quantity = parseFloat(parts[1].replace(",", ".")) || 1;
+        unit = normaliseUnit(parts[2]);
         unitPrice = parseFloat(parts[3].replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
       } else if (parts.length === 3) {
         // Legacy 3-column format: Məhsul | Say | Qiymət — default to pcs
-        name      = parts[0];
-        quantity  = parseFloat(parts[1].replace(",", ".")) || 1;
-        unit      = "pcs";
+        name = parts[0];
+        quantity = parseFloat(parts[1].replace(",", ".")) || 1;
+        unit = "pcs";
         unitPrice = parseFloat(parts[2].replace(/[^\d.,]/g, "").replace(",", ".")) || 0;
       } else {
         continue;
       }
 
-      items.push({ name: slugifyName(name), category: 1, unit, supplier: 1, price: unitPrice, quantity });
+      items.push({
+        name: slugifyName(name),
+        category: 1,
+        unit,
+        supplier: 1,
+        price: unitPrice,
+        quantity
+      });
     }
   }
 
@@ -283,18 +317,18 @@ export function parseTextReceipt(text) {
     // ── 1. Find price ────────────────────────────────────────────────────────
     // Rightmost token that looks like a number (with optional currency suffix).
     // Skip pure currency words and pure unit words.
-    let priceIdx  = -1;
+    let priceIdx = -1;
     let totalPrice = 0;
 
     for (let i = tokens.length - 1; i >= 0; i--) {
       const t = tokens[i];
       if (SKIP_WORDS.has(t.toLowerCase())) continue;
-      if (UNIT_ONLY_RE.test(t))            continue;
-      if (QTY_UNIT_RE.test(t))             continue; // qty token, not a price
+      if (UNIT_ONLY_RE.test(t)) continue;
+      if (QTY_UNIT_RE.test(t)) continue; // qty token, not a price
 
       const pm = t.match(PRICE_TOKEN_RE);
       if (pm) {
-        priceIdx   = i;
+        priceIdx = i;
         totalPrice = parseFloat(pm[1].replace(",", "."));
         break;
       }
@@ -303,9 +337,9 @@ export function parseTextReceipt(text) {
 
     // ── 2. Find quantity + unit ───────────────────────────────────────────────
     // Search rightward-to-left before the price token.
-    let qtyIdx   = -1;
-    let quantity  = 0;
-    let unit      = "pcs";
+    let qtyIdx = -1;
+    let quantity = 0;
+    let unit = "pcs";
 
     for (let i = priceIdx - 1; i >= 0; i--) {
       const t = tokens[i];
@@ -313,15 +347,15 @@ export function parseTextReceipt(text) {
       // Case A: number glued to unit  e.g. "3kg", "300gr"
       const quMatch = t.match(QTY_UNIT_RE);
       if (quMatch) {
-        const val     = parseFloat(quMatch[1].replace(",", "."));
+        const val = parseFloat(quMatch[1].replace(",", "."));
         const rawUnit = quMatch[2].toLowerCase();
 
         if (rawUnit === "g" || rawUnit === "qr" || rawUnit === "gr" || rawUnit === "qram") {
           quantity = parseFloat((val / 1000).toFixed(4));
-          unit     = "kg";
+          unit = "kg";
         } else {
           quantity = val;
-          unit     = normaliseUnit(rawUnit);
+          unit = normaliseUnit(rawUnit);
         }
         qtyIdx = i;
         break;
@@ -334,14 +368,14 @@ export function parseTextReceipt(text) {
         const nextToken = tokens[i + 1];
         const unitMatch = nextToken.match(UNIT_ONLY_RE);
         if (unitMatch) {
-          const val     = parseFloat(bareMatch[1].replace(",", "."));
+          const val = parseFloat(bareMatch[1].replace(",", "."));
           const rawUnit = unitMatch[0].toLowerCase().replace(/\.$/, "");
           if (rawUnit === "g" || rawUnit === "qr" || rawUnit === "gr" || rawUnit === "qram") {
             quantity = parseFloat((val / 1000).toFixed(4));
-            unit     = "kg";
+            unit = "kg";
           } else {
             quantity = val;
-            unit     = normaliseUnit(rawUnit);
+            unit = normaliseUnit(rawUnit);
           }
           qtyIdx = i; // name ends before i; i+1 is the unit word (skip it in name)
           break;
@@ -351,8 +385,8 @@ export function parseTextReceipt(text) {
       // Case C: bare number directly before price → count (pcs)
       if (bareMatch && i === priceIdx - 1) {
         quantity = parseFloat(bareMatch[1].replace(",", "."));
-        unit     = "pcs";
-        qtyIdx   = i;
+        unit = "pcs";
+        qtyIdx = i;
         break;
       }
     }
@@ -371,11 +405,11 @@ export function parseTextReceipt(text) {
     const unitPrice = parseFloat((totalPrice / quantity).toFixed(4));
 
     items.push({
-      name:     slugifyName(nameParts.join(" ")),
+      name: slugifyName(nameParts.join(" ")),
       category: 1,
       unit,
       supplier: 1,
-      price:    unitPrice,
+      price: unitPrice,
       quantity,
     });
   }
@@ -397,7 +431,7 @@ export function isTextReceipt(text) {
 
   // A line qualifies if it contains a price token (number optionally glued to
   // any currency suffix incl. short "m") AND either a qty+unit token OR two numbers
-  const PRICE_RE    = /\d+(?:[.,]\d+)?(manat|man|azn|m|₼)?(\s|$)/i;
+  const PRICE_RE = /\d+(?:[.,]\d+)?(manat|man|azn|m|₼)?(\s|$)/i;
   const QTY_UNIT_RE = /\d+(?:[.,]\d+)?\s*(kg|kq|g|qr|gr|qram|l|litr|ml|pcs|eded)/i;
   const TWO_NUMS_RE = /\d+\S*\s+\S*\d+/;
 
@@ -431,13 +465,18 @@ export async function sendTextReceiptToApi(text) {
     if (match) item.name = match;
   }
 
-  const results = { success: [], failed: [] };
+  const results = {
+    success: [],
+    failed: []
+  };
 
   for (const item of items) {
     try {
       const response = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify(item),
       });
 
@@ -484,13 +523,18 @@ export async function sendItemsToApi(geminiResponse) {
     if (match) item.name = match;
   }
 
-  const results = { success: [], failed: [] };
+  const results = {
+    success: [],
+    failed: []
+  };
 
   for (const item of items) {
     try {
       const response = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify(item),
       });
 
@@ -549,13 +593,17 @@ function fmtQtyUnit(item) {
   const qty = item.quantity;
   switch (item.unit) {
     case "kg":
-      return qty < 1
-        ? `${Math.round(qty * 1000)}gr`
-        : `${qty}kg`;
-    case "g":   return `${qty}g`;
-    case "l":   return `${qty}l`;
-    case "ml":  return `${qty}ml`;
-    default:    return `${qty}pcs`;   // explicit "pcs" — parseable and clear
+      return qty < 1 ?
+        `${Math.round(qty * 1000)}gr` :
+        `${qty}kg`;
+    case "g":
+      return `${qty}g`;
+    case "l":
+      return `${qty}l`;
+    case "ml":
+      return `${qty}ml`;
+    default:
+      return `${qty}pcs`; // explicit "pcs" — parseable and clear
   }
 }
 
@@ -569,7 +617,7 @@ function fmtQtyUnit(item) {
  */
 export function itemToLine(item) {
   const displayName = item.name.replace(/-/g, " ");
-  const unitPrice   = parseFloat(item.price.toFixed(2));
+  const unitPrice = parseFloat(item.price.toFixed(2));
   return `${displayName} ${fmtQtyUnit(item)} ${unitPrice} manat`;
 }
 
@@ -587,7 +635,7 @@ export function itemsToText(items) {
   return items
     .map((item, i) => {
       const displayName = item.name.replace(/-/g, " ");
-      const unitPrice   = parseFloat(item.price.toFixed(2));
+      const unitPrice = parseFloat(item.price.toFixed(2));
       return `${i + 1}. ${displayName} | ${fmtQtyUnit(item)} | ${unitPrice} manat`;
     })
     .join("\n");
@@ -603,7 +651,10 @@ export function itemsToText(items) {
 export function parseTextReceiptWithPreview(text) {
   const items = parseTextReceipt(text);
   const editableText = itemsToText(items);
-  return { items, editableText };
+  return {
+    items,
+    editableText
+  };
 }
 
 /**
@@ -616,7 +667,10 @@ export function parseTextReceiptWithPreview(text) {
 export function parseImageReceiptWithPreview(geminiResponse) {
   const items = parseItems(geminiResponse);
   const editableText = itemsToText(items);
-  return { items, editableText };
+  return {
+    items,
+    editableText
+  };
 }
 
 /**
@@ -635,7 +689,10 @@ export function parseImageReceiptWithPreview(geminiResponse) {
  */
 export function applyLineEdit(items, lineNum, lineText) {
   if (lineNum < 1 || lineNum > items.length) {
-    return { ok: false, error: `❌ ${lineNum} nömrəli sətir yoxdur. 1–${items.length} arasında rəqəm yazın.` };
+    return {
+      ok: false,
+      error: `❌ ${lineNum} nömrəli sətir yoxdur. 1–${items.length} arasında rəqəm yazın.`
+    };
   }
 
   // Strip invisible Unicode characters and pipe-separated display format
@@ -647,13 +704,22 @@ export function applyLineEdit(items, lineNum, lineText) {
 
   const parsed = parseTextReceipt(normalised);
   if (parsed.length === 0) {
-    return { ok: false, error: `❌ Format tanınmadı. Nümunə: *${lineNum} məhsul adı 3kg 100 manat*` };
+    return {
+      ok: false,
+      error: `❌ Format tanınmadı. Nümunə: *${lineNum} məhsul adı 3kg 100 manat*`
+    };
   }
 
   // Deep-copy the FULL array then replace only the target line.
-  const newItems = items.map((item) => ({ ...item }));
+  const newItems = items.map((item) => ({
+    ...item
+  }));
   newItems[lineNum - 1] = parsed[0];
-  return { ok: true, items: newItems, editableText: itemsToText(newItems) };
+  return {
+    ok: true,
+    items: newItems,
+    editableText: itemsToText(newItems)
+  };
 }
 
 /**
@@ -675,22 +741,30 @@ export function applyBatchEdit(items, text) {
   const LINE_RE = /^(\d+)\.?\s+(.+)$/;
 
   const cleanText = text.replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, "");
-  const msgLines  = cleanText.split("\n").map((l) => l.trim()).filter(Boolean);
+  const msgLines = cleanText.split("\n").map((l) => l.trim()).filter(Boolean);
 
   // Only treat as a batch edit if EVERY non-empty line starts with a number
   // (so a normal multi-line receipt isn't accidentally treated as a batch edit)
   const editLines = msgLines.filter((l) => LINE_RE.test(l));
   if (editLines.length === 0) {
-    return { ok: false, error: "Heç bir düzəliş sətiri tapılmadı." };
+    return {
+      ok: false,
+      error: "Heç bir düzəliş sətiri tapılmadı."
+    };
   }
   if (editLines.length !== msgLines.length) {
     // Mixed message — some lines have numbers, some don't → not a batch edit
-    return { ok: false, error: "mixed" };
+    return {
+      ok: false,
+      error: "mixed"
+    };
   }
 
-  const newItems = items.map((item) => ({ ...item }));
-  const changed  = [];
-  const errors   = [];
+  const newItems = items.map((item) => ({
+    ...item
+  }));
+  const changed = [];
+  const errors = [];
 
   for (const line of editLines) {
     const m = line.match(LINE_RE);
@@ -717,10 +791,19 @@ export function applyBatchEdit(items, text) {
   }
 
   if (changed.length === 0) {
-    return { ok: false, errors };
+    return {
+      ok: false,
+      errors
+    };
   }
 
-  return { ok: true, items: newItems, editableText: itemsToText(newItems), changed, errors };
+  return {
+    ok: true,
+    items: newItems,
+    editableText: itemsToText(newItems),
+    changed,
+    errors
+  };
 }
 
 /**
@@ -735,7 +818,9 @@ export async function sendParsedItemsToApi(items) {
   if (items.length === 0) return "⚠️ Heç bir məhsul tapılmadı.";
 
   // Deep-copy so fuzzy-matching does not mutate the caller's array
-  const workItems = items.map((item) => ({ ...item }));
+  const workItems = items.map((item) => ({
+    ...item
+  }));
 
   const existingItems = await fetchExistingItems();
 
@@ -744,13 +829,18 @@ export async function sendParsedItemsToApi(items) {
     if (match) item.name = match;
   }
 
-  const results = { success: [], failed: [] };
+  const results = {
+    success: [],
+    failed: []
+  };
 
   for (const item of workItems) {
     try {
       const response = await fetch(API_URL, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify(item),
       });
 
@@ -789,7 +879,7 @@ export function generateCurlForItems(geminiResponse) {
 
   const curls = items.map(
     (item) =>
-      `curl --location '${API_URL}' \\\n--header 'Content-Type: application/json' \\\n--data '${JSON.stringify(item, null, 2)}'`,
+    `curl --location '${API_URL}' \\\n--header 'Content-Type: application/json' \\\n--data '${JSON.stringify(item, null, 2)}'`,
   );
 
   return `Budur məhsullar üçün API sorğuları:\n\n${curls.join("\n\n")}`;
