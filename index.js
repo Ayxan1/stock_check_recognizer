@@ -547,7 +547,7 @@ client.on("message", async (message) => {
     };
     console.log("📩 Incoming message from:", senderInfo); // <-- log sender info
 
-    if (!ALLOWED_CONTACTS.has(senderInfo.pushName)) {
+    if (!ALLOWED_NUMBERS.has(message.from)) {
       console.log(`🚫 Ignored message from ${message.from}`);
       return;
     }
