@@ -4,6 +4,9 @@ node_modules/
 # Environment variables
 .env
 
+# Whitelist (contains phone numbers)
+whitelist.txt
+
 # WhatsApp session data
 whatsapp-session/
 

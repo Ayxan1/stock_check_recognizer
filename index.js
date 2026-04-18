@@ -1,6 +1,8 @@
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
+import fs from "fs";
+import path from "path";
 import qrcode from "qrcode-terminal";
 import pkg from "whatsapp-web.js";
 import {
@@ -11,27 +13,76 @@ import {
   parseTextReceiptWithPreview,
   sendParsedItemsToApi,
 } from "./services/curlFormatter.js";
-import { processReceiptImage } from "./services/imageProcessor.js";
+import {
+  processReceiptImage
+} from "./services/imageProcessor.js";
 
-const { Client, LocalAuth, MessageMedia, Poll } = pkg;
+const {
+  Client,
+  LocalAuth,
+  MessageMedia,
+  Poll
+} = pkg;
 
 dotenv.config();
 
+// ─── Whitelist Management ─────────────────────────────────────────────────────
+const WHITELIST_FILE = path.join(process.cwd(), "whitelist.txt");
+
+function loadWhitelist() {
+  try {
+    if (!fs.existsSync(WHITELIST_FILE)) {
+      fs.writeFileSync(WHITELIST_FILE, "", "utf-8");
+      return new Set();
+    }
+    const content = fs.readFileSync(WHITELIST_FILE, "utf-8");
+    const numbers = content
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    return new Set(numbers);
+  } catch (error) {
+    console.error("❌ Error loading whitelist:", error);
+    return new Set();
+  }
+}
+
+function saveWhitelist(numbers) {
+  try {
+    const content = Array.from(numbers).join("\n") + "\n";
+    fs.writeFileSync(WHITELIST_FILE, content, "utf-8");
+    return true;
+  } catch (error) {
+    console.error("❌ Error saving whitelist:", error);
+    return false;
+  }
+}
+
 // ─── Express HTTP Server ──────────────────────────────────────────────────────
 const app = express();
-const HTTP_PORT = process.env.WHATSAPP_SERVICE_PORT || 3001;
+const HTTP_PORT = process.env.WHATSAPP_SERVICE_PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
+// Serve static files from "public" folder for the UI
+app.use(express.static("public"));
+
 // Shared WhatsApp state (used by both the HTTP API and the WA client events)
 let client;
 let isReady = false;
-let qrCode  = null;
+let qrCode = null;
+
+// Load allowed numbers from file
+let ALLOWED_NUMBERS = loadWhitelist();
 
 // Health Check
 app.get("/health", (_req, res) => {
-  res.json({ status: "running", whatsapp_ready: isReady, timestamp: new Date().toISOString() });
+  res.json({
+    status: "running",
+    whatsapp_ready: isReady,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Status
@@ -39,28 +90,47 @@ app.get("/status", (_req, res) => {
   res.json({
     ready: isReady,
     qr_code: qrCode,
-    message: isReady
-      ? "WhatsApp is connected and ready"
-      : qrCode
-        ? "Please scan the QR code to authenticate"
-        : "WhatsApp is initializing...",
+    message: isReady ?
+      "WhatsApp is connected and ready" :
+      qrCode ?
+      "Please scan the QR code to authenticate" :
+      "WhatsApp is initializing...",
   });
 });
 
 // QR Code
 app.get("/qr", (_req, res) => {
-  if (isReady)  return res.json({ success: false, message: "WhatsApp is already authenticated" });
-  if (qrCode)   return res.json({ success: true, qr_code: qrCode });
-  res.json({ success: false, message: "QR code not available yet. Please wait..." });
+  if (isReady) return res.json({
+    success: false,
+    message: "WhatsApp is already authenticated"
+  });
+  if (qrCode) return res.json({
+    success: true,
+    qr_code: qrCode
+  });
+  res.json({
+    success: false,
+    message: "QR code not available yet. Please wait..."
+  });
 });
 
 // Send Message
 app.post("/send-message", async (req, res) => {
-  const { phone, message } = req.body;
+  const {
+    phone,
+    message
+  } = req.body;
   if (!phone || !message)
-    return res.status(400).json({ success: false, error: "Phone number and message are required" });
+    return res.status(400).json({
+      success: false,
+      error: "Phone number and message are required"
+    });
   if (!isReady)
-    return res.status(503).json({ success: false, error: "WhatsApp is not ready. Please scan QR code first.", qr_available: !!qrCode });
+    return res.status(503).json({
+      success: false,
+      error: "WhatsApp is not ready. Please scan QR code first.",
+      qr_available: !!qrCode
+    });
 
   try {
     let formattedPhone = phone.replace(/\D/g, "");
@@ -69,28 +139,52 @@ app.post("/send-message", async (req, res) => {
 
     await client.sendMessage(formattedPhone + "@c.us", message);
     console.log(`✅ Message sent to ${phone}`);
-    res.json({ success: true, message: "Message sent successfully", to: phone });
+    res.json({
+      success: true,
+      message: "Message sent successfully",
+      to: phone
+    });
   } catch (error) {
     console.error("❌ Error sending message:", error);
-    res.status(500).json({ success: false, error: "Failed to send message", details: error.message });
+    res.status(500).json({
+      success: false,
+      error: "Failed to send message",
+      details: error.message
+    });
   }
 });
 
 // Notify Order Deletion
 app.post("/notify-order-deletion", async (req, res) => {
   const {
-    owner_phone, admin_name, room_name, table_number,
-    order_id, order_created_at, deleted_at,
-    meal_name, quantity, price, reason_display, comment,
+    owner_phone,
+    admin_name,
+    room_name,
+    table_number,
+    order_id,
+    order_created_at,
+    deleted_at,
+    meal_name,
+    quantity,
+    price,
+    reason_display,
+    comment,
   } = req.body;
 
   if (!owner_phone)
-    return res.status(400).json({ success: false, error: "Owner phone number is required" });
+    return res.status(400).json({
+      success: false,
+      error: "Owner phone number is required"
+    });
   if (!isReady)
-    return res.status(503).json({ success: false, error: "WhatsApp is not ready. Please scan QR code first.", qr_available: !!qrCode });
+    return res.status(503).json({
+      success: false,
+      error: "WhatsApp is not ready. Please scan QR code first.",
+      qr_available: !!qrCode
+    });
 
   try {
-    let msg  = `🚨 *SİFARİŞ MƏHSUL SİLİNDİ*\n\n`;
+    let msg = `🚨 *SİFARİŞ MƏHSUL SİLİNDİ*\n\n`;
     msg += `👤 *Admin:* ${admin_name    || "N/A"}\n`;
     msg += `🏠 *Zal:* ${room_name       || "N/A"}\n`;
     msg += `🍽️ *Masa:* ${table_number   || "N/A"}\n`;
@@ -109,22 +203,163 @@ app.post("/notify-order-deletion", async (req, res) => {
 
     await client.sendMessage(formattedPhone + "@c.us", msg);
     console.log(`✅ Order deletion notification sent to ${owner_phone}`);
-    res.json({ success: true, message: "Notification sent successfully", to: owner_phone });
+    res.json({
+      success: true,
+      message: "Notification sent successfully",
+      to: owner_phone
+    });
   } catch (error) {
     console.error("❌ Error sending notification:", error);
-    res.status(500).json({ success: false, error: "Failed to send notification", details: error.message });
+    res.status(500).json({
+      success: false,
+      error: "Failed to send notification",
+      details: error.message
+    });
   }
 });
 
 // Logout
 app.post("/logout", async (_req, res) => {
   try {
-    if (client) await client.logout();
+    if (client) {
+      await client.logout();
+      isReady = false;
+      qrCode = null;
+    }
     console.log("📤 WhatsApp logged out");
-    res.json({ success: true, message: "Logged out successfully" });
+    res.json({
+      success: true,
+      message: "Logged out successfully"
+    });
   } catch (error) {
     console.error("❌ Error logging out:", error);
-    res.status(500).json({ success: false, error: "Failed to logout", details: error.message });
+    res.status(500).json({
+      success: false,
+      error: "Failed to logout",
+      details: error.message
+    });
+  }
+});
+
+// Get Whitelist
+app.get("/whitelist", (_req, res) => {
+  try {
+    const numbers = Array.from(ALLOWED_NUMBERS);
+    res.json({
+      success: true,
+      numbers
+    });
+  } catch (error) {
+    console.error("❌ Error getting whitelist:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get whitelist",
+      details: error.message
+    });
+  }
+});
+
+// Add to Whitelist
+app.post("/whitelist/add", (req, res) => {
+  try {
+    const {
+      number
+    } = req.body;
+    if (!number) {
+      return res.status(400).json({
+        success: false,
+        error: "Number is required"
+      });
+    }
+
+    let formattedNumber = number.trim();
+    if (!formattedNumber.endsWith("@c.us")) {
+      formattedNumber = formattedNumber + "@c.us";
+    }
+
+    if (ALLOWED_NUMBERS.has(formattedNumber)) {
+      return res.status(400).json({
+        success: false,
+        error: "Number already exists in whitelist"
+      });
+    }
+
+    ALLOWED_NUMBERS.add(formattedNumber);
+    const saved = saveWhitelist(ALLOWED_NUMBERS);
+
+    if (saved) {
+      console.log(`✅ Added ${formattedNumber} to whitelist`);
+      res.json({
+        success: true,
+        message: "Number added to whitelist",
+        number: formattedNumber
+      });
+    } else {
+      ALLOWED_NUMBERS.delete(formattedNumber); // Rollback
+      res.status(500).json({
+        success: false,
+        error: "Failed to save whitelist"
+      });
+    }
+  } catch (error) {
+    console.error("❌ Error adding to whitelist:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to add number",
+      details: error.message
+    });
+  }
+});
+
+// Remove from Whitelist
+app.post("/whitelist/remove", (req, res) => {
+  try {
+    const {
+      number
+    } = req.body;
+    if (!number) {
+      return res.status(400).json({
+        success: false,
+        error: "Number is required"
+      });
+    }
+
+    let formattedNumber = number.trim();
+    if (!formattedNumber.endsWith("@c.us")) {
+      formattedNumber = formattedNumber + "@c.us";
+    }
+
+    if (!ALLOWED_NUMBERS.has(formattedNumber)) {
+      return res.status(400).json({
+        success: false,
+        error: "Number not found in whitelist"
+      });
+    }
+
+    ALLOWED_NUMBERS.delete(formattedNumber);
+    const saved = saveWhitelist(ALLOWED_NUMBERS);
+
+    if (saved) {
+      console.log(`✅ Removed ${formattedNumber} from whitelist`);
+      res.json({
+        success: true,
+        message: "Number removed from whitelist",
+        number: formattedNumber
+      });
+    } else {
+      ALLOWED_NUMBERS.add(formattedNumber); // Rollback
+      res.status(500).json({
+        success: false,
+        error: "Failed to save whitelist"
+      });
+    }
+  } catch (error) {
+    console.error("❌ Error removing from whitelist:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to remove number",
+      details: error.message
+    });
   }
 });
 
@@ -136,18 +371,18 @@ app.listen(HTTP_PORT, () => {
   console.log(`  GET  http://localhost:${HTTP_PORT}/health`);
   console.log(`  GET  http://localhost:${HTTP_PORT}/status`);
   console.log(`  GET  http://localhost:${HTTP_PORT}/qr`);
+  console.log(`  GET  http://localhost:${HTTP_PORT}/whitelist`);
   console.log(`  POST http://localhost:${HTTP_PORT}/send-message`);
   console.log(`  POST http://localhost:${HTTP_PORT}/notify-order-deletion`);
   console.log(`  POST http://localhost:${HTTP_PORT}/logout`);
+  console.log(`  POST http://localhost:${HTTP_PORT}/whitelist/add`);
+  console.log(`  POST http://localhost:${HTTP_PORT}/whitelist/remove`);
+  console.log("=".repeat(60));
+  console.log(`  UI available at http://localhost:${HTTP_PORT}/`);
   console.log("=".repeat(60));
 });
 
 // ─── WhatsApp Client ──────────────────────────────────────────────────────────
-
-const ALLOWED_NUMBERS = new Set([
-  process.env.ALLOWED_NUMBER || "994777333003@c.us", "994518000080@c.us",
-  "994776422241@c.us",
-]);
 
 /**
  * Per-user pending drafts.
@@ -195,15 +430,17 @@ client = new Client({
 
 client.on("qr", (qr) => {
   console.log("📱 Scan the QR code below to authenticate:");
-  qrcode.generate(qr, { small: true });
-  qrCode  = qr;
+  qrcode.generate(qr, {
+    small: true
+  });
+  qrCode = qr;
   isReady = false;
 });
 
 client.on("ready", async () => {
   console.log("✅ WhatsApp Receipt Reader Bot is ready!");
   isReady = true;
-  qrCode  = null;
+  qrCode = null;
   try {
     await client.sendPresenceUnavailable();
     console.log("🔕 Presence set to unavailable (status hidden).");
@@ -297,14 +534,15 @@ function draftPrompt(editableText, count) {
  * Returns the poll message so its ID can be stored.
  */
 async function sendDraftWithPoll(chatId, editableText, count) {
-  const listMsg  = draftPrompt(editableText, count);
-  const chat     = await client.getChatById(chatId);
+  const listMsg = draftPrompt(editableText, count);
+  const chat = await client.getChatById(chatId);
   await chat.sendMessage(listMsg);
 
   const poll = new Poll(
     `📦 ${count} məhsul hazırdır. Nə edək?`,
-    ["✅ Göndər", "❌ Ləğv et"],
-    { allowMultipleAnswers: false },
+    ["✅ Göndər", "❌ Ləğv et"], {
+      allowMultipleAnswers: false
+    },
   );
   const pollMsg = await chat.sendMessage(poll);
   return pollMsg;
@@ -317,11 +555,11 @@ client.on("message", async (message) => {
       return;
     }
 
-    const userId   = message.from;
+    const userId = message.from;
     // Strip invisible Unicode characters (zero-width spaces, joiners, etc.)
     // that WhatsApp mobile keyboards can inject.
     const bodyTrim = (message.body || "").replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, "").trim();
-    const bodyLow  = bodyTrim.toLowerCase();
+    const bodyLow = bodyTrim.toLowerCase();
     const hasDraft = pendingDrafts.has(userId);
 
     // ── Help command ─────────────────────────────────────────────────────────
@@ -383,19 +621,24 @@ Sualınız varsa *!help* yazın.`);
 
       // ── Multi-line batch edit ──────────────────────────────────────────────
       if (isMultiLine) {
-        const draft  = pendingDrafts.get(userId);
+        const draft = pendingDrafts.get(userId);
         const result = applyBatchEdit(draft.items, bodyTrim);
 
         if (result.ok) {
           // Clean up stale poll
           if (draft.pollId) pollToUser.delete(draft.pollId);
 
-          pendingDrafts.set(userId, { items: result.items, editableText: result.editableText, source: draft.source, pollId: null });
+          pendingDrafts.set(userId, {
+            items: result.items,
+            editableText: result.editableText,
+            source: draft.source,
+            pollId: null
+          });
           console.log(`✏️ Batch edit: lines [${result.changed.join(", ")}] updated for ${userId}`);
 
-          const header = result.errors.length > 0
-            ? `✏️ *${result.changed.length} sətir yeniləndi* (${result.errors.length} xəta):\n${result.errors.join("\n")}\n`
-            : `✏️ *${result.changed.length} sətir yeniləndi:*`;
+          const header = result.errors.length > 0 ?
+            `✏️ *${result.changed.length} sətir yeniləndi* (${result.errors.length} xəta):\n${result.errors.join("\n")}\n` :
+            `✏️ *${result.changed.length} sətir yeniləndi:*`;
           await message.reply(header);
           const pollMsg = await sendDraftWithPoll(userId, result.editableText, result.items.length);
           pendingDrafts.get(userId).pollId = pollMsg.id._serialized;
@@ -415,9 +658,9 @@ Sualınız varsa *!help* yazın.`);
 
       // ── Single-line edit ───────────────────────────────────────────────────
       if (lineEditMatch) {
-        const lineNum  = parseInt(lineEditMatch[1], 10);
+        const lineNum = parseInt(lineEditMatch[1], 10);
         const lineText = lineEditMatch[2].trim();
-        const draft    = pendingDrafts.get(userId);
+        const draft = pendingDrafts.get(userId);
 
         console.log(`✏️ Line-edit attempt: line=${lineNum}, text="${lineText}", draft items=${draft.items.length}`);
 
@@ -433,7 +676,12 @@ Sualınız varsa *!help* yazın.`);
         // Remove old poll mapping (it's now stale)
         if (draft.pollId) pollToUser.delete(draft.pollId);
 
-        pendingDrafts.set(userId, { items: result.items, editableText: result.editableText, source: draft.source, pollId: null });
+        pendingDrafts.set(userId, {
+          items: result.items,
+          editableText: result.editableText,
+          source: draft.source,
+          pollId: null
+        });
         console.log(`✏️ Line ${lineNum} updated in draft for ${userId}`);
 
         await message.reply(`✏️ *${lineNum}-ci sətir yeniləndi:*`);
@@ -460,14 +708,22 @@ Sualınız varsa *!help* yazın.`);
         return;
       }
 
-      const { items, editableText } = parseImageReceiptWithPreview(geminiText);
+      const {
+        items,
+        editableText
+      } = parseImageReceiptWithPreview(geminiText);
 
       if (items.length === 0) {
         await message.reply("⚠️ Şəkildən heç bir məhsul aşkar edilmədi. Siyahını əl ilə göndərə bilərsiniz.");
         return;
       }
 
-      pendingDrafts.set(userId, { items, editableText, source: "image", pollId: null });
+      pendingDrafts.set(userId, {
+        items,
+        editableText,
+        source: "image",
+        pollId: null
+      });
       console.log(`📝 Image draft stored for ${userId} (${items.length} items)`);
       const pollMsg = await sendDraftWithPoll(userId, editableText, items.length);
       pendingDrafts.get(userId).pollId = pollMsg.id._serialized;
@@ -477,14 +733,22 @@ Sualınız varsa *!help* yazın.`);
 
     // ── Edited draft: user resends a full text receipt while draft is pending ─
     if (hasDraft && isTextReceipt(bodyTrim)) {
-      const { items, editableText } = parseTextReceiptWithPreview(bodyTrim);
+      const {
+        items,
+        editableText
+      } = parseTextReceiptWithPreview(bodyTrim);
 
       if (items.length === 0) {
         await message.reply("⚠️ Göndərdiyiniz mətn qəbz kimi tanınmadı. Formatı yoxlayın.\n\nMövcud siyahı hələ gözləyir. *ok* / *ləğv* yazın.");
         return;
       }
 
-      pendingDrafts.set(userId, { items, editableText, source: "text", pollId: null });
+      pendingDrafts.set(userId, {
+        items,
+        editableText,
+        source: "text",
+        pollId: null
+      });
       console.log(`✏️ Draft replaced for ${userId} (${items.length} items)`);
       const pollMsg = await sendDraftWithPoll(userId, editableText, items.length);
       pendingDrafts.get(userId).pollId = pollMsg.id._serialized;
@@ -497,14 +761,22 @@ Sualınız varsa *!help* yazın.`);
       console.log(`📝 Received text receipt from ${userId}`);
       await message.reply("📝 Mətn qəbzi alındı. Emal olunur...");
 
-      const { items, editableText } = parseTextReceiptWithPreview(bodyTrim);
+      const {
+        items,
+        editableText
+      } = parseTextReceiptWithPreview(bodyTrim);
 
       if (items.length === 0) {
         await message.reply("⚠️ Heç bir məhsul aşkar edilmədi. Formatı yoxlayın.");
         return;
       }
 
-      pendingDrafts.set(userId, { items, editableText, source: "text", pollId: null });
+      pendingDrafts.set(userId, {
+        items,
+        editableText,
+        source: "text",
+        pollId: null
+      });
       console.log(`📝 Text draft stored for ${userId} (${items.length} items)`);
       const pollMsg = await sendDraftWithPoll(userId, editableText, items.length);
       pendingDrafts.get(userId).pollId = pollMsg.id._serialized;

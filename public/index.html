@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Receipt Reader - Control Panel</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 WhatsApp Receipt Reader</h1>
+            <p class="subtitle">Control Panel</p>
+        </header>
+
+        <!-- Status Section -->
+        <section class="card">
+            <h2>📊 Connection Status</h2>
+            <div id="status-container">
+                <div class="status-item">
+                    <span class="label">Status:</span>
+                    <span id="status-text" class="status-badge pending">Checking...</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Message:</span>
+                    <span id="status-message">Loading...</span>
+                </div>
+            </div>
+            <button id="refresh-status-btn" class="btn btn-secondary">🔄 Refresh Status</button>
+        </section>
+
+        <!-- QR Code Section -->
+        <section class="card" id="qr-section">
+            <h2>📱 QR Code</h2>
+            <div id="qr-container">
+                <p id="qr-message">Loading QR code...</p>
+                <div id="qr-code"></div>
+            </div>
+            <button id="logout-btn" class="btn btn-danger" style="display: none;">🚪 Logout</button>
+        </section>
+
+        <!-- Whitelist Management Section -->
+        <section class="card">
+            <h2>📋 Whitelist Management</h2>
+            <p class="info-text">Manage authorized WhatsApp numbers that can use this bot.</p>
+            
+            <div class="add-number-form">
+                <input 
+                    type="text" 
+                    id="new-number-input" 
+                    placeholder="Enter phone number (e.g., 994777333003)" 
+                    class="input-field"
+                />
+                <button id="add-number-btn" class="btn btn-primary">➕ Add Number</button>
+            </div>
+
+            <div id="whitelist-container">
+                <h3>Whitelisted Numbers</h3>
+                <div id="number-list" class="number-list">
+                    <p class="loading-text">Loading numbers...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer>
+            <p>WhatsApp Receipt Reader v1.0 | <a href="https://github.com" target="_blank">Documentation</a></p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

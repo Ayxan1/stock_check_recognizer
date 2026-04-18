@@ -1,0 +1,8 @@
+# Whitelist Numbers
+# Add authorized WhatsApp numbers here (one per line)
+# Format: country_code + phone_number + @c.us
+# Example:
+# 994777333003@c.us
+# 994518000080@c.us
+
+# Add your numbers below:
