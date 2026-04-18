@@ -432,16 +432,10 @@ client.on("qr", (qr) => {
   isReady = false;
 });
 
-client.on("ready", async () => {
+client.on("ready", () => {
   console.log("✅ WhatsApp Receipt Reader Bot is ready!");
   isReady = true;
   qrCode = null;
-  try {
-    await client.sendPresenceUnavailable();
-    console.log("🔕 Presence set to unavailable (status hidden).");
-  } catch (e) {
-    console.warn("⚠️ Could not set presence unavailable:", e.message);
-  }
 });
 
 client.on("authenticated", () => {
