@@ -91,10 +91,8 @@ app.get("/status", (_req, res) => {
     ready: isReady,
     qr_code: qrCode,
     message: isReady ?
-      "WhatsApp is connected and ready" :
-      qrCode ?
-      "Please scan the QR code to authenticate" :
-      "WhatsApp is initializing...",
+      "WhatsApp is connected and ready" : qrCode ?
+      "Please scan the QR code to authenticate" : "WhatsApp is initializing...",
   });
 });
 
@@ -415,16 +413,7 @@ client = new Client({
   authTimeoutMs: 60000,
   puppeteer: {
     headless: true,
-    executablePath: "/usr/bin/chromium-browser",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--no-first-run",
-      "--no-zygote",
-      "--disable-gpu",
-    ],
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
   },
 });
 
@@ -550,7 +539,15 @@ async function sendDraftWithPoll(chatId, editableText, count) {
 
 client.on("message", async (message) => {
   try {
-    if (!ALLOWED_NUMBERS.has(message.from)) {
+
+    const senderInfo = {
+      from: message.from, // WhatsApp ID (could be LID)
+      pushName: message._data?.notifyName || "N/A", // Display name if available
+      number: message._data?.id?.user || "N/A", // Phone number part if exists
+    };
+    console.log("📩 Incoming message from:", senderInfo); // <-- log sender info
+
+    if (!ALLOWED_CONTACTS.has(senderInfo.pushName)) {
       console.log(`🚫 Ignored message from ${message.from}`);
       return;
     }

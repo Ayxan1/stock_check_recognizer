@@ -1,0 +1,17 @@
+               
+[Unit]
+Description=WhatsApp Receipt Reader Bot
+After=network.target
+
+[Service]
+User=aykhan
+WorkingDirectory=/home/aykhan/Desktop/KAZZA/stock_check_recognizer
+ExecStart=/home/aykhan/.nvm/versions/node/v20.20.2/bin/node index.js
+Restart=always
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+
+
+sudo nano /etc/systemd/system/whatsapp-bot.service
