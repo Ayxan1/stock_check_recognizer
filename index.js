@@ -242,10 +242,10 @@ app.post("/logout", async (_req, res) => {
 // Get Whitelist
 app.get("/whitelist", (_req, res) => {
   try {
-    const numbers = Array.from(ALLOWED_NUMBERS);
+    const names = Array.from(ALLOWED_NUMBERS);
     res.json({
       success: true,
-      numbers
+      names
     });
   } catch (error) {
     console.error("❌ Error getting whitelist:", error);
@@ -261,39 +261,42 @@ app.get("/whitelist", (_req, res) => {
 app.post("/whitelist/add", (req, res) => {
   try {
     const {
-      number
+      name
     } = req.body;
-    if (!number) {
+    if (!name) {
       return res.status(400).json({
         success: false,
-        error: "Number is required"
+        error: "Name is required"
       });
     }
 
-    let formattedNumber = number.trim();
-    if (!formattedNumber.endsWith("@c.us")) {
-      formattedNumber = formattedNumber + "@c.us";
-    }
-
-    if (ALLOWED_NUMBERS.has(formattedNumber)) {
+    const displayName = name.trim();
+    if (!displayName) {
       return res.status(400).json({
         success: false,
-        error: "Number already exists in whitelist"
+        error: "Name cannot be empty"
       });
     }
 
-    ALLOWED_NUMBERS.add(formattedNumber);
+    if (ALLOWED_NUMBERS.has(displayName)) {
+      return res.status(400).json({
+        success: false,
+        error: "Name already exists in whitelist"
+      });
+    }
+
+    ALLOWED_NUMBERS.add(displayName);
     const saved = saveWhitelist(ALLOWED_NUMBERS);
 
     if (saved) {
-      console.log(`✅ Added ${formattedNumber} to whitelist`);
+      console.log(`✅ Added ${displayName} to whitelist`);
       res.json({
         success: true,
-        message: "Number added to whitelist",
-        number: formattedNumber
+        message: "Name added to whitelist",
+        name: displayName
       });
     } else {
-      ALLOWED_NUMBERS.delete(formattedNumber); // Rollback
+      ALLOWED_NUMBERS.delete(displayName); // Rollback
       res.status(500).json({
         success: false,
         error: "Failed to save whitelist"
@@ -303,7 +306,7 @@ app.post("/whitelist/add", (req, res) => {
     console.error("❌ Error adding to whitelist:", error);
     res.status(500).json({
       success: false,
-      error: "Failed to add number",
+      error: "Failed to add name",
       details: error.message
     });
   }
@@ -313,39 +316,42 @@ app.post("/whitelist/add", (req, res) => {
 app.post("/whitelist/remove", (req, res) => {
   try {
     const {
-      number
+      name
     } = req.body;
-    if (!number) {
+    if (!name) {
       return res.status(400).json({
         success: false,
-        error: "Number is required"
+        error: "Name is required"
       });
     }
 
-    let formattedNumber = number.trim();
-    if (!formattedNumber.endsWith("@c.us")) {
-      formattedNumber = formattedNumber + "@c.us";
-    }
-
-    if (!ALLOWED_NUMBERS.has(formattedNumber)) {
+    const displayName = name.trim();
+    if (!displayName) {
       return res.status(400).json({
         success: false,
-        error: "Number not found in whitelist"
+        error: "Name cannot be empty"
       });
     }
 
-    ALLOWED_NUMBERS.delete(formattedNumber);
+    if (!ALLOWED_NUMBERS.has(displayName)) {
+      return res.status(400).json({
+        success: false,
+        error: "Name not found in whitelist"
+      });
+    }
+
+    ALLOWED_NUMBERS.delete(displayName);
     const saved = saveWhitelist(ALLOWED_NUMBERS);
 
     if (saved) {
-      console.log(`✅ Removed ${formattedNumber} from whitelist`);
+      console.log(`✅ Removed ${displayName} from whitelist`);
       res.json({
         success: true,
-        message: "Number removed from whitelist",
-        number: formattedNumber
+        message: "Name removed from whitelist",
+        name: displayName
       });
     } else {
-      ALLOWED_NUMBERS.add(formattedNumber); // Rollback
+      ALLOWED_NUMBERS.add(displayName); // Rollback
       res.status(500).json({
         success: false,
         error: "Failed to save whitelist"
@@ -355,7 +361,7 @@ app.post("/whitelist/remove", (req, res) => {
     console.error("❌ Error removing from whitelist:", error);
     res.status(500).json({
       success: false,
-      error: "Failed to remove number",
+      error: "Failed to remove name",
       details: error.message
     });
   }
@@ -547,8 +553,8 @@ client.on("message", async (message) => {
     };
     console.log("📩 Incoming message from:", senderInfo); // <-- log sender info
 
-    if (!ALLOWED_NUMBERS.has(message.from)) {
-      console.log(`🚫 Ignored message from ${message.from}`);
+    if (!ALLOWED_NUMBERS.has(senderInfo.pushName)) {
+      console.log(`🚫 Ignored message from ${senderInfo.pushName} (${message.from})`);
       return;
     }
 

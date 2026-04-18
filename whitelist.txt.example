@@ -1,8 +1,9 @@
-# Whitelist Numbers
-# Add authorized WhatsApp numbers here (one per line)
-# Format: country_code + phone_number + @c.us
+# Whitelist Display Names
+# Add authorized WhatsApp display names here (one per line)
+# These are the names that appear in WhatsApp (pushName)
 # Example:
-# 994777333003@c.us
-# 994518000080@c.us
+# Kamran
+# John Doe
+# Restaurant Manager
 
-# Add your numbers below:
+# Add your names below:

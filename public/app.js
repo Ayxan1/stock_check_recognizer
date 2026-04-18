@@ -152,14 +152,14 @@ async function handleLogout() {
     }
 }
 
-// Load whitelist numbers
+// Load whitelist names
 async function loadWhitelist() {
     try {
         const response = await fetch(`${API_BASE}/whitelist`);
         const data = await response.json();
 
         if (data.success) {
-            displayWhitelist(data.numbers);
+            displayWhitelist(data.names || data.numbers || []);
         } else {
             numberList.innerHTML = '<p class="loading-text">Failed to load whitelist</p>';
         }
@@ -169,35 +169,35 @@ async function loadWhitelist() {
     }
 }
 
-// Display whitelist numbers
-function displayWhitelist(numbers) {
-    if (numbers.length === 0) {
-        numberList.innerHTML = '<p class="loading-text">No numbers in whitelist</p>';
+// Display whitelist names
+function displayWhitelist(names) {
+    if (names.length === 0) {
+        numberList.innerHTML = '<p class="loading-text">No names in whitelist</p>';
         return;
     }
 
-    numberList.innerHTML = numbers.map(number => `
+    numberList.innerHTML = names.map(name => `
         <div class="number-item">
-            <span class="number-text">${number}</span>
-            <button class="btn btn-remove" onclick="handleRemoveNumber('${number}')">
+            <span class="number-text">${name}</span>
+            <button class="btn btn-remove" onclick="handleRemoveName('${name.replace(/'/g, "\\'")}')
                 🗑️ Remove
             </button>
         </div>
     `).join('');
 }
 
-// Handle add number
+// Handle add name
 async function handleAddNumber() {
-    const number = newNumberInput.value.trim();
+    const name = newNumberInput.value.trim();
 
-    if (!number) {
-        showNotification('⚠️ Please enter a phone number', 'warning');
+    if (!name) {
+        showNotification('⚠️ Please enter a display name', 'warning');
         return;
     }
 
-    // Basic validation
-    if (!/^\d+(@c\.us)?$/.test(number)) {
-        showNotification('⚠️ Invalid phone number format. Use digits only (e.g., 994777333003)', 'warning');
+    // Basic validation - allow any non-empty string
+    if (name.length < 1) {
+        showNotification('⚠️ Name cannot be empty', 'warning');
         return;
     }
 
@@ -211,31 +211,31 @@ async function handleAddNumber() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                number
+                name
             })
         });
 
         const data = await response.json();
 
         if (data.success) {
-            showNotification('✅ Number added successfully!', 'success');
+            showNotification('✅ Name added successfully!', 'success');
             newNumberInput.value = '';
             loadWhitelist();
         } else {
-            showNotification('❌ Failed to add number: ' + data.error, 'error');
+            showNotification('❌ Failed to add name: ' + data.error, 'error');
         }
     } catch (error) {
-        console.error('❌ Error adding number:', error);
-        showNotification('❌ Network error while adding number', 'error');
+        console.error('❌ Error adding name:', error);
+        showNotification('❌ Network error while adding name', 'error');
     } finally {
         addNumberBtn.disabled = false;
-        addNumberBtn.textContent = '➕ Add Number';
+        addNumberBtn.textContent = '➕ Add Name';
     }
 }
 
-// Handle remove number
-async function handleRemoveNumber(number) {
-    if (!confirm(`Are you sure you want to remove ${number} from the whitelist?`)) {
+// Handle remove name
+async function handleRemoveName(name) {
+    if (!confirm(`Are you sure you want to remove ${name} from the whitelist?`)) {
         return;
     }
 
@@ -246,21 +246,21 @@ async function handleRemoveNumber(number) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                number
+                name
             })
         });
 
         const data = await response.json();
 
         if (data.success) {
-            showNotification('✅ Number removed successfully!', 'success');
+            showNotification('✅ Name removed successfully!', 'success');
             loadWhitelist();
         } else {
-            showNotification('❌ Failed to remove number: ' + data.error, 'error');
+            showNotification('❌ Failed to remove name: ' + data.error, 'error');
         }
     } catch (error) {
-        console.error('❌ Error removing number:', error);
-        showNotification('❌ Network error while removing number', 'error');
+        console.error('❌ Error removing name:', error);
+        showNotification('❌ Network error while removing name', 'error');
     }
 }
 
