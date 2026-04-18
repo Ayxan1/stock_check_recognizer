@@ -224,17 +224,20 @@ app.post("/logout", async (_req, res) => {
       await client.destroy();
       isReady = false;
       qrCode = null;
-      
+
       // Delete session data
       const sessionPath = path.join(process.cwd(), "whatsapp-session");
       if (fs.existsSync(sessionPath)) {
-        fs.rmSync(sessionPath, { recursive: true, force: true });
+        fs.rmSync(sessionPath, {
+          recursive: true,
+          force: true
+        });
         console.log("🗑️ Session data deleted");
       }
-      
+
       console.log("📤 WhatsApp logged out");
       console.log("🔄 Reinitializing in 3 seconds...");
-      
+
       // Reinitialize client after a short delay
       setTimeout(() => {
         initializeClient();
@@ -546,9 +549,9 @@ function initializeClient() {
       const bodyLow = bodyTrim.toLowerCase();
       const hasDraft = pendingDrafts.has(userId);
 
-    // ── Help command ─────────────────────────────────────────────────────────
-    if (["!help", "!kömək"].includes(bodyLow)) {
-      await message.reply(`🤖 *Qəbz Oxuyan Bot*
+      // ── Help command ─────────────────────────────────────────────────────────
+      if (["!help", "!kömək"].includes(bodyLow)) {
+        await message.reply(`🤖 *Qəbz Oxuyan Bot*
 
 *Necə istifadə edilir:*
 1. Qəbz şəklini göndərin — bot emal edəcək
@@ -567,49 +570,97 @@ function initializeClient() {
   • *ləğv* / *xeyr* yazın → imtina
 
 Sualınız varsa *!help* yazın.`);
-      return;
-    }
-
-    // ── Confirmation: "ok" / "bəli" / "göndər" ──────────────────────────────
-    if (hasDraft && ["ok", "bəli", "gonder", "göndər", "yes"].includes(bodyLow)) {
-      const draft = pendingDrafts.get(userId);
-      pendingDrafts.delete(userId);
-
-      await message.reply("📡 Məhsullar API-yə göndərilir...");
-
-      try {
-        const summary = await sendParsedItemsToApi(draft.items);
-        await message.reply(summary);
-        console.log(`✅ Draft confirmed and sent to API for ${userId}`);
-      } catch (err) {
-        console.error("❌ API send error:", err);
-        await message.reply("❌ API xətası baş verdi. Zəhmət olmasa yenidən cəhd edin.");
+        return;
       }
-      return;
-    }
 
-    // ── Confirmation: "ləğv" / "xeyr" / "cancel" ────────────────────────────
-    if (hasDraft && ["ləğv", "legv", "xeyr", "cancel", "no", "imtina"].includes(bodyLow)) {
-      pendingDrafts.delete(userId);
-      await message.reply("🚫 Qəbz ləğv edildi. Yeni qəbz göndərə bilərsiniz.");
-      console.log(`🚫 Draft cancelled for ${userId}`);
-      return;
-    }
-
-    // ── Inline / batch line-edit ─────────────────────────────────────────────
-    // Single line:  "2 Pepsi Cola 1 lt*12 8.4kg 1.04 manat"
-    // Multi-line:   "1. name qty price\n2. name qty price\n..."  (full list paste)
-    if (hasDraft) {
-      const isMultiLine = bodyTrim.includes("\n");
-      const lineEditMatch = !isMultiLine && bodyTrim.match(/^(\d+)\.?\s+(.+)$/s);
-
-      // ── Multi-line batch edit ──────────────────────────────────────────────
-      if (isMultiLine) {
+      // ── Confirmation: "ok" / "bəli" / "göndər" ──────────────────────────────
+      if (hasDraft && ["ok", "bəli", "gonder", "göndər", "yes"].includes(bodyLow)) {
         const draft = pendingDrafts.get(userId);
-        const result = applyBatchEdit(draft.items, bodyTrim);
+        pendingDrafts.delete(userId);
 
-        if (result.ok) {
-          // Clean up stale poll
+        await message.reply("📡 Məhsullar API-yə göndərilir...");
+
+        try {
+          const summary = await sendParsedItemsToApi(draft.items);
+          await message.reply(summary);
+          console.log(`✅ Draft confirmed and sent to API for ${userId}`);
+        } catch (err) {
+          console.error("❌ API send error:", err);
+          await message.reply("❌ API xətası baş verdi. Zəhmət olmasa yenidən cəhd edin.");
+        }
+        return;
+      }
+
+      // ── Confirmation: "ləğv" / "xeyr" / "cancel" ────────────────────────────
+      if (hasDraft && ["ləğv", "legv", "xeyr", "cancel", "no", "imtina"].includes(bodyLow)) {
+        pendingDrafts.delete(userId);
+        await message.reply("🚫 Qəbz ləğv edildi. Yeni qəbz göndərə bilərsiniz.");
+        console.log(`🚫 Draft cancelled for ${userId}`);
+        return;
+      }
+
+      // ── Inline / batch line-edit ─────────────────────────────────────────────
+      // Single line:  "2 Pepsi Cola 1 lt*12 8.4kg 1.04 manat"
+      // Multi-line:   "1. name qty price\n2. name qty price\n..."  (full list paste)
+      if (hasDraft) {
+        const isMultiLine = bodyTrim.includes("\n");
+        const lineEditMatch = !isMultiLine && bodyTrim.match(/^(\d+)\.?\s+(.+)$/s);
+
+        // ── Multi-line batch edit ──────────────────────────────────────────────
+        if (isMultiLine) {
+          const draft = pendingDrafts.get(userId);
+          const result = applyBatchEdit(draft.items, bodyTrim);
+
+          if (result.ok) {
+            // Clean up stale poll
+            if (draft.pollId) pollToUser.delete(draft.pollId);
+
+            pendingDrafts.set(userId, {
+              items: result.items,
+              editableText: result.editableText,
+              source: draft.source,
+              pollId: null
+            });
+            console.log(`✏️ Batch edit: lines [${result.changed.join(", ")}] updated for ${userId}`);
+
+            const header = result.errors.length > 0 ?
+              `✏️ *${result.changed.length} sətir yeniləndi* (${result.errors.length} xəta):\n${result.errors.join("\n")}\n` :
+              `✏️ *${result.changed.length} sətir yeniləndi:*`;
+            await message.reply(header);
+            const pollMsg = await sendDraftWithPoll(userId, result.editableText, result.items.length);
+            pendingDrafts.get(userId).pollId = pollMsg.id._serialized;
+            pollToUser.set(pollMsg.id._serialized, userId);
+            return;
+          }
+
+          // result.error === "mixed" means some lines have numbers, some don't
+          // → fall through to the other handlers (might be a fresh receipt)
+          if (result.error !== "mixed") {
+            // All lines had numbers but none parsed — report errors
+            await message.reply(result.errors?.join("\n") || "❌ Batch düzəliş uğursuz oldu.");
+            return;
+          }
+          // else: fall through
+        }
+
+        // ── Single-line edit ───────────────────────────────────────────────────
+        if (lineEditMatch) {
+          const lineNum = parseInt(lineEditMatch[1], 10);
+          const lineText = lineEditMatch[2].trim();
+          const draft = pendingDrafts.get(userId);
+
+          console.log(`✏️ Line-edit attempt: line=${lineNum}, text="${lineText}", draft items=${draft.items.length}`);
+
+          const result = applyLineEdit(draft.items, lineNum, lineText);
+
+          if (!result.ok) {
+            await message.reply(result.error);
+            return;
+          }
+
+          console.log(`✏️ Line-edit success: result items=${result.items.length}`);
+
+          // Remove old poll mapping (it's now stale)
           if (draft.pollId) pollToUser.delete(draft.pollId);
 
           pendingDrafts.set(userId, {
@@ -618,173 +669,125 @@ Sualınız varsa *!help* yazın.`);
             source: draft.source,
             pollId: null
           });
-          console.log(`✏️ Batch edit: lines [${result.changed.join(", ")}] updated for ${userId}`);
+          console.log(`✏️ Line ${lineNum} updated in draft for ${userId}`);
 
-          const header = result.errors.length > 0 ?
-            `✏️ *${result.changed.length} sətir yeniləndi* (${result.errors.length} xəta):\n${result.errors.join("\n")}\n` :
-            `✏️ *${result.changed.length} sətir yeniləndi:*`;
-          await message.reply(header);
+          await message.reply(`✏️ *${lineNum}-ci sətir yeniləndi:*`);
           const pollMsg = await sendDraftWithPoll(userId, result.editableText, result.items.length);
           pendingDrafts.get(userId).pollId = pollMsg.id._serialized;
           pollToUser.set(pollMsg.id._serialized, userId);
           return;
         }
-
-        // result.error === "mixed" means some lines have numbers, some don't
-        // → fall through to the other handlers (might be a fresh receipt)
-        if (result.error !== "mixed") {
-          // All lines had numbers but none parsed — report errors
-          await message.reply(result.errors?.join("\n") || "❌ Batch düzəliş uğursuz oldu.");
-          return;
-        }
-        // else: fall through
       }
 
-      // ── Single-line edit ───────────────────────────────────────────────────
-      if (lineEditMatch) {
-        const lineNum = parseInt(lineEditMatch[1], 10);
-        const lineText = lineEditMatch[2].trim();
-        const draft = pendingDrafts.get(userId);
+      // ── Image receipt ────────────────────────────────────────────────────────
+      if (message.hasMedia) {
+        const media = await message.downloadMedia();
+        if (!media.mimetype.startsWith("image/")) return;
 
-        console.log(`✏️ Line-edit attempt: line=${lineNum}, text="${lineText}", draft items=${draft.items.length}`);
+        console.log(`📷 Received image from ${userId}`);
+        await message.reply("📸 Qəbz şəkli alındı. Emal olunur...");
 
-        const result = applyLineEdit(draft.items, lineNum, lineText);
+        const geminiText = await processReceiptImage(media.data, media.mimetype);
 
-        if (!result.ok) {
-          await message.reply(result.error);
+        if (!geminiText || geminiText.trim().length === 0) {
+          await message.reply("❌ Təəssüf ki, qəbzdən mətn oxuna bilmədi. Zəhmət olmasa daha aydın şəkil göndərin.");
+          console.log(`⚠️ No text extracted from image for ${userId}`);
           return;
         }
 
-        console.log(`✏️ Line-edit success: result items=${result.items.length}`);
+        const {
+          items,
+          editableText
+        } = parseImageReceiptWithPreview(geminiText);
 
-        // Remove old poll mapping (it's now stale)
-        if (draft.pollId) pollToUser.delete(draft.pollId);
+        if (items.length === 0) {
+          await message.reply("⚠️ Şəkildən heç bir məhsul aşkar edilmədi. Siyahını əl ilə göndərə bilərsiniz.");
+          return;
+        }
 
         pendingDrafts.set(userId, {
-          items: result.items,
-          editableText: result.editableText,
-          source: draft.source,
+          items,
+          editableText,
+          source: "image",
           pollId: null
         });
-        console.log(`✏️ Line ${lineNum} updated in draft for ${userId}`);
-
-        await message.reply(`✏️ *${lineNum}-ci sətir yeniləndi:*`);
-        const pollMsg = await sendDraftWithPoll(userId, result.editableText, result.items.length);
+        console.log(`📝 Image draft stored for ${userId} (${items.length} items)`);
+        const pollMsg = await sendDraftWithPoll(userId, editableText, items.length);
         pendingDrafts.get(userId).pollId = pollMsg.id._serialized;
         pollToUser.set(pollMsg.id._serialized, userId);
         return;
       }
-    }
 
-    // ── Image receipt ────────────────────────────────────────────────────────
-    if (message.hasMedia) {
-      const media = await message.downloadMedia();
-      if (!media.mimetype.startsWith("image/")) return;
+      // ── Edited draft: user resends a full text receipt while draft is pending ─
+      if (hasDraft && isTextReceipt(bodyTrim)) {
+        const {
+          items,
+          editableText
+        } = parseTextReceiptWithPreview(bodyTrim);
 
-      console.log(`📷 Received image from ${userId}`);
-      await message.reply("📸 Qəbz şəkli alındı. Emal olunur...");
+        if (items.length === 0) {
+          await message.reply("⚠️ Göndərdiyiniz mətn qəbz kimi tanınmadı. Formatı yoxlayın.\n\nMövcud siyahı hələ gözləyir. *ok* / *ləğv* yazın.");
+          return;
+        }
 
-      const geminiText = await processReceiptImage(media.data, media.mimetype);
-
-      if (!geminiText || geminiText.trim().length === 0) {
-        await message.reply("❌ Təəssüf ki, qəbzdən mətn oxuna bilmədi. Zəhmət olmasa daha aydın şəkil göndərin.");
-        console.log(`⚠️ No text extracted from image for ${userId}`);
+        pendingDrafts.set(userId, {
+          items,
+          editableText,
+          source: "text",
+          pollId: null
+        });
+        console.log(`✏️ Draft replaced for ${userId} (${items.length} items)`);
+        const pollMsg = await sendDraftWithPoll(userId, editableText, items.length);
+        pendingDrafts.get(userId).pollId = pollMsg.id._serialized;
+        pollToUser.set(pollMsg.id._serialized, userId);
         return;
       }
 
-      const {
-        items,
-        editableText
-      } = parseImageReceiptWithPreview(geminiText);
+      // ── Fresh text receipt (no pending draft) ────────────────────────────────
+      if (isTextReceipt(bodyTrim)) {
+        console.log(`📝 Received text receipt from ${userId}`);
+        await message.reply("📝 Mətn qəbzi alındı. Emal olunur...");
 
-      if (items.length === 0) {
-        await message.reply("⚠️ Şəkildən heç bir məhsul aşkar edilmədi. Siyahını əl ilə göndərə bilərsiniz.");
+        const {
+          items,
+          editableText
+        } = parseTextReceiptWithPreview(bodyTrim);
+
+        if (items.length === 0) {
+          await message.reply("⚠️ Heç bir məhsul aşkar edilmədi. Formatı yoxlayın.");
+          return;
+        }
+
+        pendingDrafts.set(userId, {
+          items,
+          editableText,
+          source: "text",
+          pollId: null
+        });
+        console.log(`📝 Text draft stored for ${userId} (${items.length} items)`);
+        const pollMsg = await sendDraftWithPoll(userId, editableText, items.length);
+        pendingDrafts.get(userId).pollId = pollMsg.id._serialized;
+        pollToUser.set(pollMsg.id._serialized, userId);
         return;
       }
 
-      pendingDrafts.set(userId, {
-        items,
-        editableText,
-        source: "image",
-        pollId: null
-      });
-      console.log(`📝 Image draft stored for ${userId} (${items.length} items)`);
-      const pollMsg = await sendDraftWithPoll(userId, editableText, items.length);
-      pendingDrafts.get(userId).pollId = pollMsg.id._serialized;
-      pollToUser.set(pollMsg.id._serialized, userId);
-      return;
-    }
-
-    // ── Edited draft: user resends a full text receipt while draft is pending ─
-    if (hasDraft && isTextReceipt(bodyTrim)) {
-      const {
-        items,
-        editableText
-      } = parseTextReceiptWithPreview(bodyTrim);
-
-      if (items.length === 0) {
-        await message.reply("⚠️ Göndərdiyiniz mətn qəbz kimi tanınmadı. Formatı yoxlayın.\n\nMövcud siyahı hələ gözləyir. *ok* / *ləğv* yazın.");
-        return;
+      // ── Unrecognised message while draft is pending ──────────────────────────
+      if (hasDraft) {
+        const draft = pendingDrafts.get(userId);
+        await message.reply(
+          `⚠️ Mesaj tanınmadı. Mövcud siyahı hələ gözləyir (${draft.items.length} məhsul).\n\n` +
+          `Sorğuda seçim edin və ya *ok* / *ləğv* yazın.\n` +
+          `Düzəliş üçün: _2 sosiska 300gr 55 manat_`
+        );
       }
 
-      pendingDrafts.set(userId, {
-        items,
-        editableText,
-        source: "text",
-        pollId: null
-      });
-      console.log(`✏️ Draft replaced for ${userId} (${items.length} items)`);
-      const pollMsg = await sendDraftWithPoll(userId, editableText, items.length);
-      pendingDrafts.get(userId).pollId = pollMsg.id._serialized;
-      pollToUser.set(pollMsg.id._serialized, userId);
-      return;
+    } catch (error) {
+      console.error("❌ Error processing message:", error);
+      try {
+        await message.reply("❌ Xəta baş verdi. Zəhmət olmasa yenidən cəhd edin.");
+      } catch (_) {}
     }
-
-    // ── Fresh text receipt (no pending draft) ────────────────────────────────
-    if (isTextReceipt(bodyTrim)) {
-      console.log(`📝 Received text receipt from ${userId}`);
-      await message.reply("📝 Mətn qəbzi alındı. Emal olunur...");
-
-      const {
-        items,
-        editableText
-      } = parseTextReceiptWithPreview(bodyTrim);
-
-      if (items.length === 0) {
-        await message.reply("⚠️ Heç bir məhsul aşkar edilmədi. Formatı yoxlayın.");
-        return;
-      }
-
-      pendingDrafts.set(userId, {
-        items,
-        editableText,
-        source: "text",
-        pollId: null
-      });
-      console.log(`📝 Text draft stored for ${userId} (${items.length} items)`);
-      const pollMsg = await sendDraftWithPoll(userId, editableText, items.length);
-      pendingDrafts.get(userId).pollId = pollMsg.id._serialized;
-      pollToUser.set(pollMsg.id._serialized, userId);
-      return;
-    }
-
-    // ── Unrecognised message while draft is pending ──────────────────────────
-    if (hasDraft) {
-      const draft = pendingDrafts.get(userId);
-      await message.reply(
-        `⚠️ Mesaj tanınmadı. Mövcud siyahı hələ gözləyir (${draft.items.length} məhsul).\n\n` +
-        `Sorğuda seçim edin və ya *ok* / *ləğv* yazın.\n` +
-        `Düzəliş üçün: _2 sosiska 300gr 55 manat_`
-      );
-    }
-
-  } catch (error) {
-    console.error("❌ Error processing message:", error);
-    try {
-      await message.reply("❌ Xəta baş verdi. Zəhmət olmasa yenidən cəhd edin.");
-    } catch (_) {}
-  }
-});
+  });
 
   client.on("error", (error) => {
     console.error("❌ Client error:", error);
