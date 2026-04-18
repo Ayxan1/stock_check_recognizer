@@ -221,10 +221,25 @@ app.post("/logout", async (_req, res) => {
   try {
     if (client) {
       await client.logout();
+      await client.destroy();
       isReady = false;
       qrCode = null;
+      
+      // Delete session data
+      const sessionPath = path.join(process.cwd(), "whatsapp-session");
+      if (fs.existsSync(sessionPath)) {
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+        console.log("🗑️ Session data deleted");
+      }
+      
+      console.log("📤 WhatsApp logged out");
+      console.log("🔄 Reinitializing in 3 seconds...");
+      
+      // Reinitialize client after a short delay
+      setTimeout(() => {
+        initializeClient();
+      }, 3000);
     }
-    console.log("📤 WhatsApp logged out");
     res.json({
       success: true,
       message: "Logged out successfully"
@@ -409,155 +424,127 @@ const pendingDrafts = new Map();
  */
 const pollToUser = new Map();
 
-client = new Client({
-  authStrategy: new LocalAuth({
-    clientId: "receipt-reader-bot",
-    dataPath: "./whatsapp-session",
-  }),
-  markOnlineOnConnect: false,
-  restartOnAuthFail: true,
-  authTimeoutMs: 60000,
-  puppeteer: {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  },
-});
+// ─── WhatsApp Client Initialization ───────────────────────────────────────────
 
-client.on("qr", (qr) => {
-  console.log("📱 Scan the QR code below to authenticate:");
-  qrcode.generate(qr, {
-    small: true
+function initializeClient() {
+  client = new Client({
+    authStrategy: new LocalAuth({
+      clientId: "receipt-reader-bot",
+      dataPath: "./whatsapp-session",
+    }),
+    markOnlineOnConnect: false,
+    restartOnAuthFail: true,
+    authTimeoutMs: 60000,
+    puppeteer: {
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    },
   });
-  qrCode = qr;
-  isReady = false;
-});
 
-client.on("ready", () => {
-  console.log("✅ WhatsApp Receipt Reader Bot is ready!");
-  isReady = true;
-  qrCode = null;
-});
+  client.on("qr", (qr) => {
+    console.log("📱 Scan the QR code below to authenticate:");
+    qrcode.generate(qr, {
+      small: true
+    });
+    qrCode = qr;
+    isReady = false;
+  });
 
-client.on("authenticated", () => {
-  console.log("✅ Client authenticated successfully!");
-});
+  client.on("ready", () => {
+    console.log("✅ WhatsApp Receipt Reader Bot is ready!");
+    isReady = true;
+    qrCode = null;
+  });
 
-client.on("auth_failure", (msg) => {
-  console.error("❌ Authentication failed:", msg);
-  isReady = false;
-});
+  client.on("authenticated", () => {
+    console.log("✅ Client authenticated successfully!");
+  });
 
-client.on("disconnected", (reason) => {
-  console.log("⚠️ Client disconnected:", reason);
-  isReady = false;
-  console.log("🔄 Reinitializing in 5 seconds...");
-  setTimeout(() => client.initialize(), 5000);
-});
+  client.on("auth_failure", (msg) => {
+    console.error("❌ Authentication failed:", msg);
+    isReady = false;
+  });
 
-// ─── Poll Vote Handler ────────────────────────────────────────────────────────
+  client.on("disconnected", (reason) => {
+    console.log("⚠️ Client disconnected:", reason);
+    isReady = false;
+    qrCode = null;
+  });
 
-client.on("vote_update", async (vote) => {
-  try {
-    const pollMsgId = vote.parentMessage?.id?._serialized;
-    if (!pollMsgId) return;
+  // ─── Poll Vote Handler ────────────────────────────────────────────────────
 
-    const userId = pollToUser.get(pollMsgId);
-    if (!userId) return; // not one of our polls
+  client.on("vote_update", async (vote) => {
+    try {
+      const pollMsgId = vote.parentMessage?.id?._serialized;
+      if (!pollMsgId) return;
 
-    const selectedOptions = vote.selectedOptions?.map((o) => o.name) ?? [];
-    console.log(`🗳️ Poll vote from ${userId}: [${selectedOptions.join(", ")}]`);
+      const userId = pollToUser.get(pollMsgId);
+      if (!userId) return; // not one of our polls
 
-    const chat = await client.getChatById(userId);
+      const selectedOptions = vote.selectedOptions?.map((o) => o.name) ?? [];
+      console.log(`🗳️ Poll vote from ${userId}: [${selectedOptions.join(", ")}]`);
 
-    // ── "✅ Göndər" ────────────────────────────────────────────────────────
-    if (selectedOptions.includes("✅ Göndər")) {
-      const draft = pendingDrafts.get(userId);
-      if (!draft) {
-        await chat.sendMessage("⚠️ Aktiv siyahı tapılmadı. Yeni qəbz göndərin.");
+      const chat = await client.getChatById(userId);
+
+      // ── "✅ Göndər" ────────────────────────────────────────────────────────
+      if (selectedOptions.includes("✅ Göndər")) {
+        const draft = pendingDrafts.get(userId);
+        if (!draft) {
+          await chat.sendMessage("⚠️ Aktiv siyahı tapılmadı. Yeni qəbz göndərin.");
+          pollToUser.delete(pollMsgId);
+          return;
+        }
+
+        pendingDrafts.delete(userId);
         pollToUser.delete(pollMsgId);
+
+        await chat.sendMessage("📡 Məhsullar API-yə göndərilir...");
+        try {
+          const summary = await sendParsedItemsToApi(draft.items);
+          await chat.sendMessage(summary);
+          console.log(`✅ Poll-confirmed draft sent to API for ${userId}`);
+        } catch (err) {
+          console.error("❌ API send error (poll):", err);
+          await chat.sendMessage("❌ API xətası baş verdi. Zəhmət olmasa yenidən cəhd edin.");
+        }
         return;
       }
 
-      pendingDrafts.delete(userId);
-      pollToUser.delete(pollMsgId);
-
-      await chat.sendMessage("📡 Məhsullar API-yə göndərilir...");
-      try {
-        const summary = await sendParsedItemsToApi(draft.items);
-        await chat.sendMessage(summary);
-        console.log(`✅ Poll-confirmed draft sent to API for ${userId}`);
-      } catch (err) {
-        console.error("❌ API send error (poll):", err);
-        await chat.sendMessage("❌ API xətası baş verdi. Zəhmət olmasa yenidən cəhd edin.");
+      // ── "❌ Ləğv et" ───────────────────────────────────────────────────────
+      if (selectedOptions.includes("❌ Ləğv et")) {
+        pendingDrafts.delete(userId);
+        pollToUser.delete(pollMsgId);
+        await chat.sendMessage("🚫 Qəbz ləğv edildi. Yeni qəbz göndərə bilərsiniz.");
+        console.log(`🚫 Poll-cancelled draft for ${userId}`);
       }
-      return;
+    } catch (err) {
+      console.error("❌ Error handling vote_update:", err);
     }
+  });
 
-    // ── "❌ Ləğv et" ───────────────────────────────────────────────────────
-    if (selectedOptions.includes("❌ Ləğv et")) {
-      pendingDrafts.delete(userId);
-      pollToUser.delete(pollMsgId);
-      await chat.sendMessage("🚫 Qəbz ləğv edildi. Yeni qəbz göndərə bilərsiniz.");
-      console.log(`🚫 Poll-cancelled draft for ${userId}`);
-    }
-  } catch (err) {
-    console.error("❌ Error handling vote_update:", err);
-  }
-});
+  // ─── Incoming Message Handler ─────────────────────────────────────────────
 
-// ─── Incoming Message Handler ─────────────────────────────────────────────────
+  client.on("message", async (message) => {
+    try {
 
-/** Build the confirmation prompt shown after every draft update. */
-function draftPrompt(editableText, count) {
-  return (
-    `📋 *Aşkar edilən məhsullar (${count} ədəd):*\n\n` +
-    `${editableText}\n\n` +
-    `✏️ Düzəliş: sətir nömrəsini yazın, sonra yeni dəyər\n` +
-    `_Nümunə: *2 sosiska seher 300gr 55 manat*_\n\n` +
-    `⬇️ Aşağıdakı sorğuda seçim edin və ya *ok* / *ləğv* yazın`
-  );
-}
+      const senderInfo = {
+        from: message.from, // WhatsApp ID (could be LID)
+        pushName: message._data?.notifyName || "N/A", // Display name if available
+        number: message._data?.id?.user || "N/A", // Phone number part if exists
+      };
+      console.log("📩 Incoming message from:", senderInfo); // <-- log sender info
 
-/**
- * Send the item list + a confirmation Poll.
- * Returns the poll message so its ID can be stored.
- */
-async function sendDraftWithPoll(chatId, editableText, count) {
-  const listMsg = draftPrompt(editableText, count);
-  const chat = await client.getChatById(chatId);
-  await chat.sendMessage(listMsg);
+      if (!ALLOWED_NUMBERS.has(senderInfo.pushName)) {
+        console.log(`🚫 Ignored message from ${senderInfo.pushName} (${message.from})`);
+        return;
+      }
 
-  const poll = new Poll(
-    `📦 ${count} məhsul hazırdır. Nə edək?`,
-    ["✅ Göndər", "❌ Ləğv et"], {
-      allowMultipleAnswers: false
-    },
-  );
-  const pollMsg = await chat.sendMessage(poll);
-  return pollMsg;
-}
-
-client.on("message", async (message) => {
-  try {
-
-    const senderInfo = {
-      from: message.from, // WhatsApp ID (could be LID)
-      pushName: message._data?.notifyName || "N/A", // Display name if available
-      number: message._data?.id?.user || "N/A", // Phone number part if exists
-    };
-    console.log("📩 Incoming message from:", senderInfo); // <-- log sender info
-
-    if (!ALLOWED_NUMBERS.has(senderInfo.pushName)) {
-      console.log(`🚫 Ignored message from ${senderInfo.pushName} (${message.from})`);
-      return;
-    }
-
-    const userId = message.from;
-    // Strip invisible Unicode characters (zero-width spaces, joiners, etc.)
-    // that WhatsApp mobile keyboards can inject.
-    const bodyTrim = (message.body || "").replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, "").trim();
-    const bodyLow = bodyTrim.toLowerCase();
-    const hasDraft = pendingDrafts.has(userId);
+      const userId = message.from;
+      // Strip invisible Unicode characters (zero-width spaces, joiners, etc.)
+      // that WhatsApp mobile keyboards can inject.
+      const bodyTrim = (message.body || "").replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, "").trim();
+      const bodyLow = bodyTrim.toLowerCase();
+      const hasDraft = pendingDrafts.has(userId);
 
     // ── Help command ─────────────────────────────────────────────────────────
     if (["!help", "!kömək"].includes(bodyLow)) {
@@ -799,13 +786,50 @@ Sualınız varsa *!help* yazın.`);
   }
 });
 
-client.on("error", (error) => {
-  console.error("❌ Client error:", error);
-});
+  client.on("error", (error) => {
+    console.error("❌ Client error:", error);
+  });
+
+  // Start the client
+  console.log("🔄 Initializing WhatsApp client...");
+  client.initialize();
+}
+
+// ─── Helper Functions ──────────────────────────────────────────────────────────
+
+/** Build the confirmation prompt shown after every draft update. */
+function draftPrompt(editableText, count) {
+  return (
+    `📋 *Aşkar edilən məhsullar (${count} ədəd):*\n\n` +
+    `${editableText}\n\n` +
+    `✏️ Düzəliş: sətir nömrəsini yazın, sonra yeni dəyər\n` +
+    `_Nümunə: *2 sosiska seher 300gr 55 manat*_\n\n` +
+    `⬇️ Aşağıdakı sorğuda seçim edin və ya *ok* / *ləğv* yazın`
+  );
+}
+
+/**
+ * Send the item list + a confirmation Poll.
+ * Returns the poll message so its ID can be stored.
+ */
+async function sendDraftWithPoll(chatId, editableText, count) {
+  const listMsg = draftPrompt(editableText, count);
+  const chat = await client.getChatById(chatId);
+  await chat.sendMessage(listMsg);
+
+  const poll = new Poll(
+    `📦 ${count} məhsul hazırdır. Nə edək?`,
+    ["✅ Göndər", "❌ Ləğv et"], {
+      allowMultipleAnswers: false
+    },
+  );
+  const pollMsg = await chat.sendMessage(poll);
+  return pollMsg;
+}
 
 // ─── Boot ──────────────────────────────────────────────────────────────────────
 console.log("🚀 Starting WhatsApp Receipt Reader Bot...");
-client.initialize();
+initializeClient();
 
 process.on("SIGINT", async () => {
   console.log("\n⚠️ Shutting down gracefully...");
