@@ -179,7 +179,7 @@ function displayWhitelist(names) {
     numberList.innerHTML = names.map(name => `
         <div class="number-item">
             <span class="number-text">${name}</span>
-            <button class="btn btn-remove" onclick="handleRemoveName('${name.replace(/'/g, "\\'")}')
+            <button class="btn btn-remove" onclick="handleRemoveName('${name.replace(/'/g, "\\'")}')">
                 🗑️ Remove
             </button>
         </div>
